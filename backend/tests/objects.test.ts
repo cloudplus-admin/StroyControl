@@ -11,6 +11,7 @@ async function seedCompany() {
 
 beforeEach(async () => {
   await prisma.object.deleteMany({});
+  await prisma.user.deleteMany({});
   await prisma.company.deleteMany({});
 });
 
