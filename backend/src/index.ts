@@ -1,14 +1,9 @@
 import 'dotenv/config';
-import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { createApp } from './app';
 
-const app = express();
-app.use(express.json());
-
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok' });
-});
+const app = createApp();
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });

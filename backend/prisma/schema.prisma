@@ -57,42 +57,48 @@ model Object {
 }
 
 model Stage {
-  id        String       @id @default(uuid())
-  objectId  String       @map("object_id")
-  object    Object       @relation(fields: [objectId], references: [id])
+  id        String        @id @default(uuid())
+  objectId  String        @map("object_id")
+  object    Object        @relation(fields: [objectId], references: [id], onDelete: Cascade)
   name      String
-  sortOrder Int          @default(0) @map("sort_order")
+  sortOrder Int           @default(0) @map("sort_order")
   sections  WorkSection[]
 
+  @@index([objectId])
   @@map("stages")
 }
 
 model WorkSection {
   id        String @id @default(uuid())
   stageId   String @map("stage_id")
-  stage     Stage  @relation(fields: [stageId], references: [id])
+  stage     Stage  @relation(fields: [stageId], references: [id], onDelete: Cascade)
   name      String
   sortOrder Int    @default(0) @map("sort_order")
   tasks     Task[]
 
+  @@index([stageId])
   @@map("work_sections")
 }
 
 model Task {
-  id            String   @id @default(uuid())
-  workSectionId String   @map("work_section_id")
-  workSection   WorkSection @relation(fields: [workSectionId], references: [id])
-  parentTaskId  String?  @map("parent_task_id")
-  title         String
-  description   String?
-  status        String   @default("open")
-  priority      String   @default("normal")
-  plannedStart  DateTime? @map("planned_start")
-  plannedEnd    DateTime? @map("planned_end")
-  actualStart   DateTime? @map("actual_start")
-  actualEnd     DateTime? @map("actual_end")
-  slaHours      Int?     @map("sla_hours")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id             String      @id @default(uuid())
+  workSectionId  String      @map("work_section_id")
+  workSection    WorkSection @relation(fields: [workSectionId], references: [id], onDelete: Cascade)
+  parentTaskId   String?     @map("parent_task_id")
+  title          String
+  description    String?
+  status         String      @default("open")
+  priority       String      @default("normal")
+  plannedStart   DateTime?   @map("planned_start")
+  plannedEnd     DateTime?   @map("planned_end")
+  baselineStart  DateTime?   @map("baseline_start")
+  baselineEnd    DateTime?   @map("baseline_end")
+  actualStart    DateTime?   @map("actual_start")
+  actualEnd      DateTime?   @map("actual_end")
+  dependsOn      String[]    @default([]) @map("depends_on")
+  slaHours       Int?        @map("sla_hours")
+  createdAt      DateTime    @default(now()) @map("created_at")
 
+  @@index([workSectionId])
   @@map("tasks")
 }

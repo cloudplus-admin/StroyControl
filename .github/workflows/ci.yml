@@ -11,6 +11,22 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: stroycontrol
+          POSTGRES_PASSWORD: stroycontrol
+          POSTGRES_DB: stroycontrol_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stroycontrol"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://stroycontrol:stroycontrol@localhost:5432/stroycontrol_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,6 +37,8 @@ jobs:
       - run: npm install
       - run: npm run lint --if-present
       - run: npm run build
+      - run: npx prisma migrate deploy
+      - run: npx vitest run
 
   web:
     runs-on: ubuntu-latest
