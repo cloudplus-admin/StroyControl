@@ -1,0 +1,98 @@
+// Prisma-схема — соответствует docs/DATABASE_SCHEMA.sql
+// Полное описание всех модулей будет расширяться по мере разработки модулей Этапа 1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  users     User[]
+  objects   Object[]
+
+  @@map("companies")
+}
+
+model Role {
+  id   Int    @id @default(autoincrement())
+  code String @unique
+  name String
+
+  @@map("roles")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  company      Company  @relation(fields: [companyId], references: [id])
+  email        String   @unique
+  phone        String?
+  fullName     String   @map("full_name")
+  passwordHash String   @map("password_hash")
+  locale       String   @default("ru")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+model Object {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  company      Company  @relation(fields: [companyId], references: [id])
+  name         String
+  address      String?
+  templateCode String?  @map("template_code")
+  status       String   @default("active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  stages       Stage[]
+
+  @@map("objects")
+}
+
+model Stage {
+  id        String       @id @default(uuid())
+  objectId  String       @map("object_id")
+  object    Object       @relation(fields: [objectId], references: [id])
+  name      String
+  sortOrder Int          @default(0) @map("sort_order")
+  sections  WorkSection[]
+
+  @@map("stages")
+}
+
+model WorkSection {
+  id        String @id @default(uuid())
+  stageId   String @map("stage_id")
+  stage     Stage  @relation(fields: [stageId], references: [id])
+  name      String
+  sortOrder Int    @default(0) @map("sort_order")
+  tasks     Task[]
+
+  @@map("work_sections")
+}
+
+model Task {
+  id            String   @id @default(uuid())
+  workSectionId String   @map("work_section_id")
+  workSection   WorkSection @relation(fields: [workSectionId], references: [id])
+  parentTaskId  String?  @map("parent_task_id")
+  title         String
+  description   String?
+  status        String   @default("open")
+  priority      String   @default("normal")
+  plannedStart  DateTime? @map("planned_start")
+  plannedEnd    DateTime? @map("planned_end")
+  actualStart   DateTime? @map("actual_start")
+  actualEnd     DateTime? @map("actual_end")
+  slaHours      Int?     @map("sla_hours")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("tasks")
+}
