@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>StroyControl — Диаграмма Ганта</title>
+<link rel="stylesheet" href="../design-system.css" />
+<style>
+  .gantt { display: grid; grid-template-columns: 260px 1fr; }
+  .gantt__row { display: contents; }
+  .gantt__label { padding: 10px 14px; border-bottom: 1px solid var(--color-border); font-size: 13px; display:flex; align-items:center; }
+  .gantt__label--stage { font-weight: 700; background: #fafbfc; }
+  .gantt__track { position: relative; border-bottom: 1px solid var(--color-border); background-image: repeating-linear-gradient(to right, transparent, transparent calc(100%/12 - 1px), var(--color-border) calc(100%/12 - 1px), var(--color-border) calc(100%/12)); }
+  .gantt__track--stage { background: #fafbfc; }
+  .bar { position: absolute; top: 8px; height: 22px; border-radius: 5px; font-size: 11px; color: #fff; display:flex; align-items:center; padding: 0 8px; white-space:nowrap; overflow:hidden; }
+  .bar--done { background: var(--color-success); }
+  .bar--progress { background: var(--color-primary); }
+  .bar--risk { background: var(--color-warning); }
+  .bar--overdue { background: var(--color-danger); }
+  .bar--baseline { position:absolute; top: 33px; height: 3px; background: #d0d5dd; border-radius: 2px; }
+  .months { display:grid; grid-template-columns: 260px 1fr; border-bottom: 1px solid var(--color-border); }
+  .months__inner { display:grid; grid-template-columns: repeat(6,1fr); }
+  .months__inner div { padding: 8px 12px; font-size: 12px; color: var(--color-text-muted); border-left: 1px solid var(--color-border); }
+  .legend { display:flex; gap:16px; font-size:12.5px; color:var(--color-text-muted); margin-bottom:16px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width:10px;height:10px;border-radius:3px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar__logo"><span class="sidebar__logo-mark">SC</span> StroyControl</div>
+    <nav>
+      <a href="#" class="active">🏗 Объекты</a>
+      <a href="#">✅ Задачи</a>
+      <a href="#">📷 Фотоконтроль</a>
+      <a href="#">🎥 Видеонаблюдение</a>
+      <a href="#">💬 Лента</a>
+      <a href="#">📄 Документы</a>
+      <a href="#">💰 Финансы</a>
+      <a href="#">📦 Снабжение и склад</a>
+      <div class="sidebar__section">Прочее</div>
+      <a href="#">👤 Кабинет заказчика</a>
+      <a href="#">⚙️ Администрирование</a>
+    </nav>
+    <div class="sidebar__user">
+      <div class="avatar">РБ</div>
+      <div>
+        <div style="color:#fff;font-size:13px;font-weight:600;">Рустам Бек</div>
+        <div style="font-size:11.5px;">Руководитель проекта</div>
+      </div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="topbar__breadcrumb">Объекты / ЖК «Тошкент Сити», корп. 2</div>
+        <h1>План-график</h1>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn">Канбан</button>
+        <button class="btn">Календарь</button>
+        <button class="btn btn--primary">Гант ✓</button>
+      </div>
+    </div>
+    <div class="content">
+      <div class="legend">
+        <span><i class="dot" style="background:var(--color-success)"></i>Выполнено</span>
+        <span><i class="dot" style="background:var(--color-primary)"></i>В работе</span>
+        <span><i class="dot" style="background:var(--color-warning)"></i>Риск срыва</span>
+        <span><i class="dot" style="background:var(--color-danger)"></i>Просрочено</span>
+        <span><i class="dot" style="background:#d0d5dd"></i>Baseline (план)</span>
+      </div>
+      <div class="card" style="overflow:hidden;">
+        <div class="months">
+          <div></div>
+          <div class="months__inner">
+            <div>Май</div><div>Июн</div><div>Июл</div><div>Авг</div><div>Сен</div><div>Окт</div>
+          </div>
+        </div>
+        <div class="gantt">
+          <div class="gantt__label gantt__label--stage">Этап 1. Земляные работы</div>
+          <div class="gantt__track gantt__track--stage"></div>
+
+          <div class="gantt__label" style="padding-left:28px;">Разработка котлована</div>
+          <div class="gantt__track"><div class="bar bar--done" style="left:2%;width:14%;">Готово</div></div>
+
+          <div class="gantt__label" style="padding-left:28px;">Устройство фундамента</div>
+          <div class="gantt__track"><div class="bar bar--done" style="left:16%;width:18%;">Готово</div><div class="bar--baseline" style="left:16%;width:20%;"></div></div>
+
+          <div class="gantt__label gantt__label--stage">Этап 2. Каркас здания</div>
+          <div class="gantt__track gantt__track--stage"></div>
+
+          <div class="gantt__label" style="padding-left:28px;">Монолитные работы, 1–5 этаж</div>
+          <div class="gantt__track"><div class="bar bar--progress" style="left:34%;width:22%;">В работе 60%</div><div class="bar--baseline" style="left:36%;width:20%;"></div></div>
+
+          <div class="gantt__label" style="padding-left:28px;">Монолитные работы, 6–10 этаж</div>
+          <div class="gantt__track"><div class="bar bar--risk" style="left:52%;width:20%;">Риск сдвига +6 дн.</div></div>
+
+          <div class="gantt__label" style="padding-left:28px;">Кладка наружных стен</div>
+          <div class="gantt__track"><div class="bar bar--overdue" style="left:58%;width:14%;">Просрочено 3 дн.</div></div>
+
+          <div class="gantt__label gantt__label--stage">Этап 3. Инженерные системы</div>
+          <div class="gantt__track gantt__track--stage"></div>
+
+          <div class="gantt__label" style="padding-left:28px;">Электромонтаж</div>
+          <div class="gantt__track"><div class="bar" style="left:70%;width:16%;background:#e4e7ec;color:#667085;">Не начато</div></div>
+
+          <div class="gantt__label" style="padding-left:28px;">Сантехника и вентиляция</div>
+          <div class="gantt__track"><div class="bar" style="left:76%;width:18%;background:#e4e7ec;color:#667085;">Не начато</div></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px; padding:14px 18px; display:flex; align-items:center; gap:10px; border-left:3px solid var(--color-warning);">
+        <span style="font-size:18px;">⚠️</span>
+        <div style="font-size:13px;">
+          <strong>Прогноз сдвига сдачи объекта:</strong> при текущем темпе — риск смещения даты сдачи на <strong>+9 дней</strong> из-за задержки «Кладка наружных стен» (критический путь).
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

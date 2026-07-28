@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>StroyControl — Объекты</title>
+<link rel="stylesheet" href="../design-system.css" />
+<style>
+  .obj-grid { grid-template-columns: repeat(3, 1fr); }
+  .obj-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .obj-card__title { font-size: 15px; font-weight: 600; margin: 0; }
+  .obj-card__addr { font-size: 12.5px; color: var(--color-text-muted); margin: -8px 0 0; }
+  .obj-card__meta { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--color-text-muted); }
+  .obj-card__thumb { height: 110px; border-radius: var(--radius-sm); background: linear-gradient(135deg,#eef4ff,#e4ecff); display:flex;align-items:center;justify-content:center;color:#8ba6e8;font-size:12px; }
+  .kpi-row { grid-template-columns: repeat(4, 1fr); margin-bottom: 24px; }
+  .kpi { padding: 16px 18px; }
+  .kpi__label { font-size: 12.5px; color: var(--color-text-muted); }
+  .kpi__value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar__logo"><span class="sidebar__logo-mark">SC</span> StroyControl</div>
+    <nav>
+      <a href="#" class="active">🏗 Объекты</a>
+      <a href="#">✅ Задачи</a>
+      <a href="#">📷 Фотоконтроль</a>
+      <a href="#">🎥 Видеонаблюдение</a>
+      <a href="#">💬 Лента</a>
+      <a href="#">📄 Документы</a>
+      <a href="#">💰 Финансы</a>
+      <a href="#">📦 Снабжение и склад</a>
+      <div class="sidebar__section">Прочее</div>
+      <a href="#">👤 Кабинет заказчика</a>
+      <a href="#">⚙️ Администрирование</a>
+    </nav>
+    <div class="sidebar__user">
+      <div class="avatar">РБ</div>
+      <div>
+        <div style="color:#fff;font-size:13px;font-weight:600;">Рустам Бек</div>
+        <div style="font-size:11.5px;">Руководитель проекта</div>
+      </div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>Объекты</h1>
+      <button class="btn btn--primary">+ Новый объект</button>
+    </div>
+    <div class="content">
+      <div class="grid kpi-row">
+        <div class="card kpi"><div class="kpi__label">Активных объектов</div><div class="kpi__value">12</div></div>
+        <div class="card kpi"><div class="kpi__label">Задач в работе</div><div class="kpi__value">341</div></div>
+        <div class="card kpi"><div class="kpi__label">Риск срыва срока</div><div class="kpi__value" style="color:var(--color-danger)">3</div></div>
+        <div class="card kpi"><div class="kpi__label">Открытых замечаний</div><div class="kpi__value" style="color:var(--color-warning)">27</div></div>
+      </div>
+
+      <div class="grid obj-grid">
+        <div class="card obj-card">
+          <div class="obj-card__thumb">Фото объекта</div>
+          <h3 class="obj-card__title">ЖК «Тошкент Сити», корп. 2</h3>
+          <p class="obj-card__addr">г. Ташкент, Мирабадский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:64%"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 64%</span><span class="badge badge--success">В графике</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb">Фото объекта</div>
+          <h3 class="obj-card__title">Малоэтажный ЖК «Оазис»</h3>
+          <p class="obj-card__addr">г. Ташкент, Юнусабадский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:38%;background:var(--color-warning)"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 38%</span><span class="badge badge--warning">Риск сдвига</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb">Фото объекта</div>
+          <h3 class="obj-card__title">Реконструкция офиса «Bekzod Plaza»</h3>
+          <p class="obj-card__addr">г. Ташкент, Яшнабадский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:81%"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 81%</span><span class="badge badge--success">В графике</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb">Фото объекта</div>
+          <h3 class="obj-card__title">Складской комплекс «Логистик-1»</h3>
+          <p class="obj-card__addr">Ташкентская обл., Кибрайский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:22%;background:var(--color-danger)"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 22%</span><span class="badge badge--danger">Срыв срока</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb">Фото объекта</div>
+          <h3 class="obj-card__title">Коттеджный посёлок «Зелёный берег»</h3>
+          <p class="obj-card__addr">Ташкентская обл., Бостанлыкский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:55%"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 55%</span><span class="badge badge--success">В графике</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb">Фото объекта</div>
+          <h3 class="obj-card__title">Бизнес-центр «Sputnik Tower»</h3>
+          <p class="obj-card__addr">г. Ташкент, Шайхантахурский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:47%"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 47%</span><span class="badge badge--success">В графике</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>StroyControl — Задачи</title>
+<link rel="stylesheet" href="../design-system.css" />
+<style>
+  .board { display:grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items:start; }
+  .col__head { display:flex; align-items:center; justify-content:space-between; padding: 4px 6px 12px; font-size:13px; font-weight:700; }
+  .col__count { font-size:12px; color:var(--color-text-muted); font-weight:500; }
+  .task-card { padding: 12px 14px; margin-bottom: 10px; display:flex; flex-direction:column; gap:8px; }
+  .task-card__title { font-size:13px; font-weight:600; }
+  .task-card__obj { font-size:11.5px; color: var(--color-text-muted); }
+  .task-card__foot { display:flex; align-items:center; justify-content:space-between; }
+  .tag { font-size:11px; padding:2px 7px; border-radius:5px; background:var(--color-primary-soft); color:var(--color-primary); }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar__logo"><span class="sidebar__logo-mark">SC</span> StroyControl</div>
+    <nav>
+      <a href="#">🏗 Объекты</a>
+      <a href="#" class="active">✅ Задачи</a>
+      <a href="#">📷 Фотоконтроль</a>
+      <a href="#">🎥 Видеонаблюдение</a>
+      <a href="#">💬 Лента</a>
+      <a href="#">📄 Документы</a>
+      <a href="#">💰 Финансы</a>
+      <a href="#">📦 Снабжение и склад</a>
+      <div class="sidebar__section">Прочее</div>
+      <a href="#">👤 Кабинет заказчика</a>
+      <a href="#">⚙️ Администрирование</a>
+    </nav>
+    <div class="sidebar__user">
+      <div class="avatar">АК</div>
+      <div>
+        <div style="color:#fff;font-size:13px;font-weight:600;">Азиз Каримов</div>
+        <div style="font-size:11.5px;">Прораб</div>
+      </div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>Задачи — ЖК «Тошкент Сити», корп. 2</h1>
+      <button class="btn btn--primary">+ Задача</button>
+    </div>
+    <div class="content">
+      <div class="board">
+        <div>
+          <div class="col__head">Открыто <span class="col__count">6</span></div>
+          <div class="card task-card">
+            <span class="tag">Кладка</span>
+            <div class="task-card__title">Кладка наружных стен, ось А–Д</div>
+            <div class="task-card__obj">6–10 этаж</div>
+            <div class="task-card__foot"><span class="badge badge--danger">Просрочено 3 дн.</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">БР</div></div>
+          </div>
+          <div class="card task-card">
+            <span class="tag">ТБ</span>
+            <div class="task-card__title">Ежедневный обход по технике безопасности</div>
+            <div class="task-card__obj">Повторяющаяся · ежедневно</div>
+            <div class="task-card__foot"><span class="badge badge--neutral">Сегодня</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">АК</div></div>
+          </div>
+          <div class="card task-card">
+            <span class="tag">Электрика</span>
+            <div class="task-card__title">Разводка кабель-каналов, 3 этаж</div>
+            <div class="task-card__obj">Плановый старт: 04.08</div>
+            <div class="task-card__foot"><span class="badge badge--neutral">Не начато</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">НХ</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="col__head">В работе <span class="col__count">4</span></div>
+          <div class="card task-card">
+            <span class="tag">Монолит</span>
+            <div class="task-card__title">Монолитные работы, 6 этаж, перекрытие</div>
+            <div class="task-card__obj">Чек-лист: 4/6 выполнено</div>
+            <div class="progress"><div class="progress__bar" style="width:66%"></div></div>
+            <div class="task-card__foot"><span class="badge badge--warning">Риск: +2 дня</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">БР</div></div>
+          </div>
+          <div class="card task-card">
+            <span class="tag">Фасад</span>
+            <div class="task-card__title">Утепление фасада, южная сторона</div>
+            <div class="task-card__obj">Чек-лист: 2/5 выполнено</div>
+            <div class="progress"><div class="progress__bar" style="width:40%"></div></div>
+            <div class="task-card__foot"><span class="badge badge--success">В графике</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">ДС</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="col__head">Проверка <span class="col__count">3</span></div>
+          <div class="card task-card">
+            <span class="tag">Технадзор</span>
+            <div class="task-card__title">Приёмка скрытых работ — арматура перекрытия 6 эт.</div>
+            <div class="task-card__obj">Ожидает инженера ОКК</div>
+            <div class="task-card__foot"><span class="badge badge--warning">На проверке</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">ГМ</div></div>
+          </div>
+          <div class="card task-card">
+            <span class="tag">Акт</span>
+            <div class="task-card__title">Акт скрытых работ — гидроизоляция фундамента</div>
+            <div class="task-card__obj">Фотофиксация приложена</div>
+            <div class="task-card__foot"><span class="badge badge--warning">На проверке</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">ГМ</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="col__head">Готово <span class="col__count">18</span></div>
+          <div class="card task-card">
+            <span class="tag">Земляные</span>
+            <div class="task-card__title">Разработка котлована</div>
+            <div class="task-card__obj">Закрыто 12.06 · с фото и геометкой</div>
+            <div class="task-card__foot"><span class="badge badge--success">Готово</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">АК</div></div>
+          </div>
+          <div class="card task-card">
+            <span class="tag">Фундамент</span>
+            <div class="task-card__title">Устройство фундаментной плиты</div>
+            <div class="task-card__obj">Закрыто 28.06 · акт подписан</div>
+            <div class="task-card__foot"><span class="badge badge--success">Готово</span><div class="avatar" style="width:24px;height:24px;font-size:10px;">АК</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

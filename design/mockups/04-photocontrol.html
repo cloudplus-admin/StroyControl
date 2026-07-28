@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>StroyControl — Фотоконтроль и технадзор</title>
+<link rel="stylesheet" href="../design-system.css" />
+<style>
+  .split { display:grid; grid-template-columns: 1fr 340px; gap: 20px; }
+  .photo-grid { grid-template-columns: repeat(3, 1fr); }
+  .photo { aspect-ratio: 4/3; border-radius: var(--radius-md); background: linear-gradient(135deg,#eef4ff,#dfe8fb); display:flex; align-items:center; justify-content:center; color:#8ba6e8; font-size:12px; position:relative; overflow:hidden; }
+  .photo__tag { position:absolute; top:8px; left:8px; background:rgba(16,24,40,.65); color:#fff; font-size:10.5px; padding:2px 8px; border-radius:999px; }
+  .photo__pt { position:absolute; bottom:8px; left:8px; background:rgba(255,255,255,.9); font-size:10.5px; padding:2px 8px; border-radius:999px; color:var(--color-text); }
+  .defect { padding:12px 14px; display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+  .defect__title { font-size:13px; font-weight:600; }
+  .defect__meta { font-size:11.5px; color:var(--color-text-muted); }
+  .status-pipeline { display:flex; gap:4px; margin-top:4px; }
+  .status-pipeline span { flex:1; text-align:center; font-size:10px; padding:3px 0; border-radius:4px; background:#f2f4f7; color:var(--color-text-muted); }
+  .status-pipeline span.active { background:var(--color-warning-soft); color:var(--color-warning); font-weight:700; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar__logo"><span class="sidebar__logo-mark">SC</span> StroyControl</div>
+    <nav>
+      <a href="#">🏗 Объекты</a>
+      <a href="#">✅ Задачи</a>
+      <a href="#" class="active">📷 Фотоконтроль</a>
+      <a href="#">🎥 Видеонаблюдение</a>
+      <a href="#">💬 Лента</a>
+      <a href="#">📄 Документы</a>
+      <a href="#">💰 Финансы</a>
+      <a href="#">📦 Снабжение и склад</a>
+      <div class="sidebar__section">Прочее</div>
+      <a href="#">👤 Кабинет заказчика</a>
+      <a href="#">⚙️ Администрирование</a>
+    </nav>
+    <div class="sidebar__user">
+      <div class="avatar">ГМ</div>
+      <div>
+        <div style="color:#fff;font-size:13px;font-weight:600;">Гуля Мирзаева</div>
+        <div style="font-size:11.5px;">Инженер технадзора</div>
+      </div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="topbar__breadcrumb">ЖК «Тошкент Сити», корп. 2</div>
+        <h1>Фотоконтроль и технадзор</h1>
+      </div>
+      <button class="btn btn--primary">+ Фотоотчёт</button>
+    </div>
+    <div class="content">
+      <div class="tabs">
+        <a href="#" class="active">Фотолента</a>
+        <a href="#">Точки съёмки (таймлайн)</a>
+        <a href="#">Дефект-лист</a>
+        <a href="#">Акты выполненных работ</a>
+      </div>
+      <div class="split">
+        <div>
+          <div class="grid photo-grid">
+            <div class="photo"><span class="photo__tag">До</span><span class="photo__pt">Точка №4 · 24.07</span>Фото «до»</div>
+            <div class="photo"><span class="photo__tag">После</span><span class="photo__pt">Точка №4 · 27.07</span>Фото «после»</div>
+            <div class="photo"><span class="photo__tag">Скрытые работы</span><span class="photo__pt">Подпись: Г. Мирзаева</span>Фото</div>
+            <div class="photo"><span class="photo__tag">Прогресс</span><span class="photo__pt">Точка №2 · 26.07</span>Фото</div>
+            <div class="photo"><span class="photo__tag">Прогресс</span><span class="photo__pt">Точка №1 · 26.07</span>Фото</div>
+            <div class="photo"><span class="photo__tag">Замечание</span><span class="photo__pt">Точка №7 · 25.07</span>Фото</div>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size:13px;margin:0 0 10px;">Журнал замечаний</h3>
+          <div class="card defect" style="border-left:3px solid var(--color-danger);">
+            <div class="defect__title">Отсутствие СИЗ у рабочих на 6 этаже</div>
+            <div class="defect__meta">Обнаружено ИИ-анализом фото · 27.07, 09:14</div>
+            <div class="status-pipeline">
+              <span class="active">Открыто</span><span>Исправляется</span><span>Проверено</span><span>Закрыто</span>
+            </div>
+          </div>
+          <div class="card defect" style="border-left:3px solid var(--color-warning);">
+            <div class="defect__title">Неровность кладки, ось В-3</div>
+            <div class="defect__meta">Г. Мирзаева · 26.07, 15:40</div>
+            <div class="status-pipeline">
+              <span>Открыто</span><span class="active">Исправляется</span><span>Проверено</span><span>Закрыто</span>
+            </div>
+          </div>
+          <div class="card defect" style="border-left:3px solid var(--color-success);">
+            <div class="defect__title">Отклонение геометрии котлована</div>
+            <div class="defect__meta">Закрыто 15.06 · акт подписан</div>
+            <div class="status-pipeline">
+              <span>Открыто</span><span>Исправляется</span><span>Проверено</span><span class="active" style="background:var(--color-success-soft);color:var(--color-success);">Закрыто</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
