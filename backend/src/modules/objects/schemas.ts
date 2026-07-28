@@ -36,15 +36,3 @@ export const createTaskSchema = z.object({
   dependsOn: z.array(z.string().uuid()).default([]),
   slaHours: z.number().int().positive().optional(),
 });
-
-export const updateTaskSchema = z.object({
-  title: z.string().min(1).max(300).optional(),
-  description: z.string().max(2000).optional(),
-  status: z.enum(['open', 'in_progress', 'done', 'overdue']).optional(),
-  priority: z.enum(['low', 'normal', 'high']).optional(),
-  plannedStart: isoDate.optional(),
-  plannedEnd: isoDate.optional(),
-  actualStart: isoDate.optional(),
-  actualEnd: isoDate.optional(),
-  dependsOn: z.array(z.string().uuid()).optional(),
-});

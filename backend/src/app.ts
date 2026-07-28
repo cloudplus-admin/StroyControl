@@ -1,5 +1,6 @@
 import express from 'express';
 import { objectsRouter } from './modules/objects/router';
+import { tasksRouter } from './modules/tasks/router';
 
 export function createApp() {
   const app = express();
@@ -10,6 +11,7 @@ export function createApp() {
   });
 
   app.use('/api/objects', objectsRouter);
+  app.use('/api/tasks', tasksRouter);
 
   return app;
 }

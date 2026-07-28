@@ -90,12 +90,12 @@ describe('object progress and risk aggregation', () => {
       .send({ title: 'Просроченная задача', plannedEnd: new Date(Date.now() - 86400000).toISOString() });
 
     await request(app)
-      .patch(`/api/objects/tasks/${overdueTaskRes.body.id}`)
+      .patch(`/api/tasks/${overdueTaskRes.body.id}`)
       .set('x-company-id', company.id)
       .send({ status: 'done' });
 
     await request(app)
-      .patch(`/api/objects/tasks/${overdueTaskRes.body.id}`)
+      .patch(`/api/tasks/${overdueTaskRes.body.id}`)
       .set('x-company-id', company.id)
       .send({ status: 'open' });
 

@@ -151,14 +151,6 @@ export async function addTask(
   return prisma.task.create({ data: { workSectionId, ...input } });
 }
 
-export async function updateTask(companyId: string, taskId: string, input: Record<string, unknown>) {
-  const task = await prisma.task.findFirst({
-    where: { id: taskId, workSection: { stage: { object: { companyId } } } },
-  });
-  if (!task) return null;
-  return prisma.task.update({ where: { id: taskId }, data: input });
-}
-
 export async function getGanttData(companyId: string, objectId: string) {
   const object = await getObject(companyId, objectId);
   if (!object) return null;

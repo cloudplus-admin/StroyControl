@@ -6,7 +6,6 @@ import {
   createStageSchema,
   createSectionSchema,
   createTaskSchema,
-  updateTaskSchema,
 } from './schemas';
 import * as objectsService from './service';
 
@@ -129,15 +128,4 @@ objectsRouter.post('/sections/:sectionId/tasks', async (req, res, next) => {
   }
 });
 
-objectsRouter.patch('/tasks/:taskId', async (req, res, next) => {
-  try {
-    const companyId = requireCompanyId(req, res);
-    if (!companyId) return;
-    const input = updateTaskSchema.parse(req.body);
-    const task = await objectsService.updateTask(companyId, req.params.taskId, input);
-    if (!task) return res.status(404).json({ error: 'not_found' });
-    res.json(task);
-  } catch (err) {
-    if (handleZodError(err, res, next)) return;
-  }
-});
+// Обновление/закрытие/чек-лист отдельной задачи — см. модуль tasks (/api/tasks/:id).

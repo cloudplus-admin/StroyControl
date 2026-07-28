@@ -38,6 +38,7 @@ model User {
   passwordHash String   @map("password_hash")
   locale       String   @default("ru")
   createdAt    DateTime @default(now()) @map("created_at")
+  assignedTasks Task[]
 
   @@map("users")
 }
@@ -81,24 +82,47 @@ model WorkSection {
 }
 
 model Task {
-  id             String      @id @default(uuid())
-  workSectionId  String      @map("work_section_id")
-  workSection    WorkSection @relation(fields: [workSectionId], references: [id], onDelete: Cascade)
-  parentTaskId   String?     @map("parent_task_id")
-  title          String
-  description    String?
-  status         String      @default("open")
-  priority       String      @default("normal")
-  plannedStart   DateTime?   @map("planned_start")
-  plannedEnd     DateTime?   @map("planned_end")
-  baselineStart  DateTime?   @map("baseline_start")
-  baselineEnd    DateTime?   @map("baseline_end")
-  actualStart    DateTime?   @map("actual_start")
-  actualEnd      DateTime?   @map("actual_end")
-  dependsOn      String[]    @default([]) @map("depends_on")
-  slaHours       Int?        @map("sla_hours")
-  createdAt      DateTime    @default(now()) @map("created_at")
+  id               String      @id @default(uuid())
+  workSectionId    String      @map("work_section_id")
+  workSection      WorkSection @relation(fields: [workSectionId], references: [id], onDelete: Cascade)
+  parentTaskId     String?     @map("parent_task_id")
+  assigneeId       String?     @map("assignee_id")
+  assignee         User?       @relation(fields: [assigneeId], references: [id])
+  title            String
+  description      String?
+  status           String      @default("open")
+  priority         String      @default("normal")
+  tags             String[]    @default([])
+  plannedStart     DateTime?   @map("planned_start")
+  plannedEnd       DateTime?   @map("planned_end")
+  baselineStart    DateTime?   @map("baseline_start")
+  baselineEnd      DateTime?   @map("baseline_end")
+  actualStart      DateTime?   @map("actual_start")
+  actualEnd        DateTime?   @map("actual_end")
+  dependsOn        String[]    @default([]) @map("depends_on")
+  slaHours         Int?        @map("sla_hours")
+  isRecurring      Boolean     @default(false) @map("is_recurring")
+  recurrenceRule   String?     @map("recurrence_rule")
+  closurePhotoUrl  String?     @map("closure_photo_url")
+  closureGeoLat    Float?      @map("closure_geo_lat")
+  closureGeoLng    Float?      @map("closure_geo_lng")
+  closedAt         DateTime?   @map("closed_at")
+  escalatedAt      DateTime?   @map("escalated_at")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  checklist        TaskChecklistItem[]
 
   @@index([workSectionId])
+  @@index([assigneeId])
   @@map("tasks")
+}
+
+model TaskChecklistItem {
+  id     String  @id @default(uuid())
+  taskId String  @map("task_id")
+  task   Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  label  String
+  isDone Boolean @default(false) @map("is_done")
+
+  @@index([taskId])
+  @@map("task_checklist_items")
 }
