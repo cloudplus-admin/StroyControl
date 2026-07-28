@@ -60,3 +60,22 @@ Expo (managed workflow) + React Native + TypeScript, структура:
 `stroycontrol-demo/` — экраны из `../design/` обёрнуты через Capacitor в
 Android-приложение, чтобы посмотреть UI на телефоне уже сейчас, не дожидаясь
 React Native разработки. См. `stroycontrol-demo/README.md`.
+
+## Debug-APK из настоящего RN-приложения (`app/`) — CI
+
+Job `mobile-apk` в `.github/workflows/ci.yml` собирает debug-APK реального
+Expo/React Native приложения (`expo prebuild --platform android` +
+`./gradlew assembleDebug`) на каждый push в `main`, используя только
+предустановленные на GitHub-раннере Android SDK/JDK — без EAS Build и без
+внешних облачных сервисов сборки.
+
+Как скачать собранный APK:
+1. Открыть репозиторий на GitHub → вкладка **Actions**.
+2. Выбрать последний зелёный run workflow **CI** (или конкретный commit).
+3. В самом низу страницы run — секция **Artifacts** → скачать
+   `stroycontrol-debug-apk` (zip с `app-debug.apk` внутри).
+4. Либо через `gh` CLI: `gh run download <run-id> -R cloudplus-admin/StroyControl`.
+
+**Важно**: это debug-сборка, подписанная стандартным debug-keystore Android
+(не production/Play Store релиз). Годится для установки и демонстрации на
+тестовом устройстве, не для публикации в магазине.

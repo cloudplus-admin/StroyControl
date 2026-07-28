@@ -7,6 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
+      "bundleIdentifier": "uz.cloudplus.stroycontrol",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Камера нужна для фотофиксации при закрытии задач на объекте.",
@@ -14,6 +15,7 @@
       }
     },
     "android": {
+      "package": "uz.cloudplus.stroycontrol",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
