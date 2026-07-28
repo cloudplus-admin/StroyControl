@@ -4,6 +4,7 @@ import { tasksRouter } from './modules/tasks/router';
 import { photocontrolRouter } from './modules/photocontrol/router';
 import { feedRouter } from './modules/feed/router';
 import { documentsRouter } from './modules/documents/router';
+import { customerPortalRouter } from './modules/customer-portal/router';
 
 export function createApp() {
   const app = express();
@@ -18,6 +19,7 @@ export function createApp() {
   app.use('/api', photocontrolRouter);
   app.use('/api', feedRouter);
   app.use('/api', documentsRouter);
+  app.use('/api', customerPortalRouter);
 
   return app;
 }
