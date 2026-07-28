@@ -41,6 +41,8 @@ model User {
   assignedTasks        Task[]
   authoredPhotoReports PhotoReport[]
   reportedDefects      Defect[]
+  feedEvents           FeedEvent[]
+  feedReactions        FeedReaction[]
 
   @@map("users")
 }
@@ -57,6 +59,7 @@ model Object {
   stages       Stage[]
   photoReports PhotoReport[]
   defects      Defect[]
+  feedEvents   FeedEvent[]
 
   @@map("objects")
 }
@@ -169,4 +172,37 @@ model Defect {
 
   @@index([objectId])
   @@map("defects")
+}
+
+model FeedEvent {
+  id              String         @id @default(uuid())
+  objectId        String         @map("object_id")
+  object          Object         @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  authorId        String?        @map("author_id")
+  author          User?          @relation(fields: [authorId], references: [id])
+  kind            String         @default("message") // message | status_change | acceptance | file
+  body            String?
+  mentionedUserIds String[]      @default([]) @map("mentioned_user_ids")
+  parentEventId   String?        @map("parent_event_id")
+  parentEvent     FeedEvent?     @relation("FeedThread", fields: [parentEventId], references: [id], onDelete: SetNull)
+  replies         FeedEvent[]    @relation("FeedThread")
+  reactions       FeedReaction[]
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  @@index([objectId, createdAt])
+  @@index([parentEventId])
+  @@map("feed_events")
+}
+
+model FeedReaction {
+  id        String    @id @default(uuid())
+  eventId   String    @map("event_id")
+  event     FeedEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id])
+  emoji     String
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@unique([eventId, userId])
+  @@map("feed_reactions")
 }

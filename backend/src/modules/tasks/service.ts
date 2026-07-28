@@ -1,7 +1,16 @@
 import { prisma } from '../../db/prisma';
+import { createSystemEvent } from '../feed/service';
 
 function scopedTaskWhere(companyId: string, taskId: string) {
   return { id: taskId, workSection: { stage: { object: { companyId } } } };
+}
+
+async function getTaskObjectId(taskId: string): Promise<string | null> {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { workSection: { select: { stage: { select: { objectId: true } } } } },
+  });
+  return task?.workSection.stage.objectId ?? null;
 }
 
 export async function getTask(companyId: string, taskId: string) {
@@ -43,7 +52,7 @@ export async function closeTask(
 ) {
   const task = await prisma.task.findFirst({ where: scopedTaskWhere(companyId, taskId) });
   if (!task) return null;
-  return prisma.task.update({
+  const updated = await prisma.task.update({
     where: { id: taskId },
     data: {
       status: 'done',
@@ -54,6 +63,13 @@ export async function closeTask(
       closureGeoLng: input.geoLng,
     },
   });
+
+  const objectId = await getTaskObjectId(taskId);
+  if (objectId) {
+    await createSystemEvent(objectId, 'status_change', `Задача «${task.title}» закрыта с площадки (фото + геометка)`);
+  }
+
+  return updated;
 }
 
 /**

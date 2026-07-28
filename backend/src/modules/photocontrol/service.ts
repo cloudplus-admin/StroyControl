@@ -1,4 +1,5 @@
 import { prisma } from '../../db/prisma';
+import { createSystemEvent } from '../feed/service';
 
 export async function listPhotoReports(companyId: string, objectId: string) {
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
@@ -68,5 +69,11 @@ export async function createDefect(
 export async function updateDefectStatus(companyId: string, defectId: string, status: string) {
   const defect = await prisma.defect.findFirst({ where: { id: defectId, object: { companyId } } });
   if (!defect) return null;
-  return prisma.defect.update({ where: { id: defectId }, data: { status } });
+  const updated = await prisma.defect.update({ where: { id: defectId }, data: { status } });
+  await createSystemEvent(
+    defect.objectId,
+    'status_change',
+    `Замечание «${defect.description}» — статус изменён на «${status}»`,
+  );
+  return updated;
 }
