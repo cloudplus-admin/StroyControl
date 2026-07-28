@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">StroyControl (демо)</string>
+    <string name="title_activity_main">StroyControl (демо)</string>
+    <string name="package_name">com.cloudplus.stroycontrol.demo</string>
+    <string name="custom_url_scheme">com.cloudplus.stroycontrol.demo</string>
+</resources>

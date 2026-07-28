@@ -1,0 +1,8 @@
+{
+  "appId": "com.cloudplus.stroycontrol.demo",
+  "appName": "StroyControl (демо)",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

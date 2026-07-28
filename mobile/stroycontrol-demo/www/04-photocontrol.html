@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>StroyControl — Фотоконтроль и технадзор</title>
+<link rel="stylesheet" href="./design-system.css" />
+<style>
+  .split { display:grid; grid-template-columns: 1fr 340px; gap: 20px; }
+  .photo-grid { grid-template-columns: repeat(3, 1fr); }
+  .photo { aspect-ratio: 4/3; border-radius: var(--radius-md); background: linear-gradient(135deg,#eef4ff,#dfe8fb); display:flex; align-items:center; justify-content:center; color:#a9bdf0; position:relative; overflow:hidden; transition: transform .2s ease, box-shadow .2s ease; cursor:pointer; }
+  .photo:hover { transform: scale(1.02); box-shadow: var(--shadow-md); }
+  .photo svg { width:26px; height:26px; }
+  .photo__tag { position:absolute; top:8px; left:8px; background:rgba(16,24,40,.65); color:#fff; font-size:10.5px; padding:2px 8px; border-radius:999px; }
+  .photo__pt { position:absolute; bottom:8px; left:8px; background:rgba(255,255,255,.9); font-size:10.5px; padding:2px 8px; border-radius:999px; color:var(--color-text); }
+  .defect { padding:12px 14px; display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+  .defect__title { font-size:13px; font-weight:600; }
+  .defect__meta { font-size:11.5px; color:var(--color-text-muted); }
+  .status-pipeline { display:flex; gap:4px; margin-top:4px; }
+  .status-pipeline span { flex:1; text-align:center; font-size:10px; padding:3px 0; border-radius:4px; background:#f2f4f7; color:var(--color-text-muted); }
+  .status-pipeline span.active { background:var(--color-warning-soft); color:var(--color-warning); font-weight:700; }
+</style>
+</head>
+<body>
+<svg style="display:none">
+  <defs>
+    <symbol id="icon-objects" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V7l8-4 8 4v14"/><path d="M4 21h16"/><rect x="9" y="12" width="2.4" height="2.4"/><rect x="12.6" y="12" width="2.4" height="2.4"/><rect x="9" y="16" width="2.4" height="2.4"/><rect x="12.6" y="16" width="2.4" height="2.4"/></symbol>
+    <symbol id="icon-tasks" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><path d="M8 12.5l2.7 2.7L16.5 9"/></symbol>
+    <symbol id="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A1.5 1.5 0 015.5 7h2l1-2h7l1 2h2A1.5 1.5 0 0120 8.5v9A1.5 1.5 0 0118.5 19h-13A1.5 1.5 0 014 17.5v-9z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+    <symbol id="icon-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6.5" width="12" height="11" rx="2"/><path d="M15.5 10.5l5-2.7v8.4l-5-2.7z"/></symbol>
+    <symbol id="icon-feed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v10H9l-4 3.5v-3.5H4z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
+    <symbol id="icon-documents" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4"/><path d="M9.5 13h5M9.5 16h5"/></symbol>
+    <symbol id="icon-finance" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M14.7 9.8c0-1-1-1.8-2.7-1.8s-2.6.9-2.6 1.9c0 2.7 5.3 1.3 5.3 3.9 0 1.1-1.1 2-2.7 2s-2.9-.8-2.9-1.9"/></symbol>
+    <symbol id="icon-supply" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l8 4.3v8.4l-8 4.3-8-4.3V7.8z"/><path d="M4 7.8L12 12l8-4.2M12 12v9.5"/></symbol>
+    <symbol id="icon-customer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.3" r="3.3"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 00-2.1-1.2L14 3h-4l-.5 2.6a7 7 0 00-2.1 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 000 2.4l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2.1 1.2L10 21h4l.5-2.6c.8-.3 1.5-.7 2.1-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/></symbol>
+    <symbol id="icon-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10a6 6 0 1112 0c0 4.5 1.5 6 1.5 6h-15S6 14.5 6 10z"/><path d="M10 19a2 2 0 004 0"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+  </defs>
+</svg>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar__logo"><span class="sidebar__logo-mark">SC</span> StroyControl</div>
+    <nav>
+      <a href="./01-objects-dashboard.html"><svg class="icon"><use href="#icon-objects"/></svg> Объекты</a>
+      <a href="./03-tasks-kanban.html"><svg class="icon"><use href="#icon-tasks"/></svg> Задачи</a>
+      <a href="./04-photocontrol.html" class="active"><svg class="icon"><use href="#icon-camera"/></svg> Фотоконтроль</a>
+      <a href="#"><svg class="icon"><use href="#icon-video"/></svg> Видеонаблюдение</a>
+      <a href="./05-feed.html"><svg class="icon"><use href="#icon-feed"/></svg> Лента</a>
+      <a href="#"><svg class="icon"><use href="#icon-documents"/></svg> Документы</a>
+      <a href="#"><svg class="icon"><use href="#icon-finance"/></svg> Финансы</a>
+      <a href="#"><svg class="icon"><use href="#icon-supply"/></svg> Снабжение и склад</a>
+      <div class="sidebar__section">Прочее</div>
+      <a href="./06-customer-portal.html"><svg class="icon"><use href="#icon-customer"/></svg> Кабинет заказчика</a>
+      <a href="#"><svg class="icon"><use href="#icon-settings"/></svg> Администрирование</a>
+    </nav>
+    <div class="sidebar__user">
+      <div class="avatar">ГМ</div>
+      <div>
+        <div style="color:#fff;font-size:13px;font-weight:600;">Гуля Мирзаева</div>
+        <div style="font-size:11.5px;">Инженер технадзора</div>
+      </div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="topbar__breadcrumb"><a href="./01-objects-dashboard.html" style="color:inherit;text-decoration:none;">Объекты</a> / ЖК «Тошкент Сити», корп. 2</div>
+        <h1>Фотоконтроль и технадзор</h1>
+      </div>
+      <div class="topbar__actions">
+        <button class="icon-btn"><svg class="icon"><use href="#icon-search"/></svg></button>
+        <button class="btn btn--primary"><svg class="icon" style="width:14px;height:14px;"><use href="#icon-plus"/></svg> Фотоотчёт</button>
+      </div>
+    </div>
+    <div class="content">
+      <div class="tabs">
+        <a href="#" class="active">Фотолента</a>
+        <a href="#">Точки съёмки (таймлайн)</a>
+        <a href="#">Дефект-лист</a>
+        <a href="#">Акты выполненных работ</a>
+      </div>
+      <div class="split">
+        <div>
+          <div class="grid photo-grid">
+            <div class="photo"><span class="photo__tag">До</span><span class="photo__pt">Точка №4 · 24.07</span><svg><use href="#icon-camera"/></svg></div>
+            <div class="photo"><span class="photo__tag">После</span><span class="photo__pt">Точка №4 · 27.07</span><svg><use href="#icon-camera"/></svg></div>
+            <div class="photo"><span class="photo__tag">Скрытые работы</span><span class="photo__pt">Подпись: Г. Мирзаева</span><svg><use href="#icon-camera"/></svg></div>
+            <div class="photo"><span class="photo__tag">Прогресс</span><span class="photo__pt">Точка №2 · 26.07</span><svg><use href="#icon-camera"/></svg></div>
+            <div class="photo"><span class="photo__tag">Прогресс</span><span class="photo__pt">Точка №1 · 26.07</span><svg><use href="#icon-camera"/></svg></div>
+            <div class="photo"><span class="photo__tag">Замечание</span><span class="photo__pt">Точка №7 · 25.07</span><svg><use href="#icon-camera"/></svg></div>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size:13px;margin:0 0 10px;">Журнал замечаний</h3>
+          <div class="card defect" style="border-left:3px solid var(--color-danger);">
+            <div class="defect__title">Отсутствие СИЗ у рабочих на 6 этаже</div>
+            <div class="defect__meta">Обнаружено ИИ-анализом фото · 27.07, 09:14</div>
+            <div class="status-pipeline">
+              <span class="active">Открыто</span><span>Исправляется</span><span>Проверено</span><span>Закрыто</span>
+            </div>
+          </div>
+          <div class="card defect" style="border-left:3px solid var(--color-warning);">
+            <div class="defect__title">Неровность кладки, ось В-3</div>
+            <div class="defect__meta">Г. Мирзаева · 26.07, 15:40</div>
+            <div class="status-pipeline">
+              <span>Открыто</span><span class="active">Исправляется</span><span>Проверено</span><span>Закрыто</span>
+            </div>
+          </div>
+          <div class="card defect" style="border-left:3px solid var(--color-success);">
+            <div class="defect__title">Отклонение геометрии котлована</div>
+            <div class="defect__meta">Закрыто 15.06 · акт подписан</div>
+            <div class="status-pipeline">
+              <span>Открыто</span><span>Исправляется</span><span>Проверено</span><span class="active" style="background:var(--color-success-soft);color:var(--color-success);">Закрыто</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

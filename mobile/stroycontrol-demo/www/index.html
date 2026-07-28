@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>StroyControl — Объекты</title>
+<link rel="stylesheet" href="./design-system.css" />
+<style>
+  .obj-grid { grid-template-columns: repeat(3, 1fr); }
+  .obj-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; cursor: pointer; }
+  .obj-card__title { font-size: 15px; font-weight: 600; margin: 0; }
+  .obj-card__addr { font-size: 12.5px; color: var(--color-text-muted); margin: -8px 0 0; }
+  .obj-card__meta { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--color-text-muted); }
+  .obj-card__thumb { height: 110px; border-radius: var(--radius-sm); background: linear-gradient(135deg,#eef4ff,#e4ecff); display:flex;align-items:center;justify-content:center;color:#a9bdf0; }
+  .obj-card__thumb svg { width: 30px; height: 30px; }
+  .kpi-row { grid-template-columns: repeat(4, 1fr); margin-bottom: 24px; }
+  .kpi { padding: 16px 18px; display:flex; align-items:center; gap:12px; }
+  .kpi__icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .kpi__icon svg { width:19px; height:19px; }
+  .kpi__label { font-size: 12.5px; color: var(--color-text-muted); }
+  .kpi__value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+</style>
+</head>
+<body>
+<svg style="display:none">
+  <defs>
+    <symbol id="icon-objects" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V7l8-4 8 4v14"/><path d="M4 21h16"/><rect x="9" y="12" width="2.4" height="2.4"/><rect x="12.6" y="12" width="2.4" height="2.4"/><rect x="9" y="16" width="2.4" height="2.4"/><rect x="12.6" y="16" width="2.4" height="2.4"/></symbol>
+    <symbol id="icon-tasks" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><path d="M8 12.5l2.7 2.7L16.5 9"/></symbol>
+    <symbol id="icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A1.5 1.5 0 015.5 7h2l1-2h7l1 2h2A1.5 1.5 0 0120 8.5v9A1.5 1.5 0 0118.5 19h-13A1.5 1.5 0 014 17.5v-9z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+    <symbol id="icon-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6.5" width="12" height="11" rx="2"/><path d="M15.5 10.5l5-2.7v8.4l-5-2.7z"/></symbol>
+    <symbol id="icon-feed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5h16v10H9l-4 3.5v-3.5H4z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
+    <symbol id="icon-documents" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4"/><path d="M9.5 13h5M9.5 16h5"/></symbol>
+    <symbol id="icon-finance" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v9M14.7 9.8c0-1-1-1.8-2.7-1.8s-2.6.9-2.6 1.9c0 2.7 5.3 1.3 5.3 3.9 0 1.1-1.1 2-2.7 2s-2.9-.8-2.9-1.9"/></symbol>
+    <symbol id="icon-supply" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l8 4.3v8.4l-8 4.3-8-4.3V7.8z"/><path d="M4 7.8L12 12l8-4.2M12 12v9.5"/></symbol>
+    <symbol id="icon-customer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.3" r="3.3"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 00-2.1-1.2L14 3h-4l-.5 2.6a7 7 0 00-2.1 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 000 2.4l-2 1.5 2 3.4 2.3-.9c.6.5 1.3.9 2.1 1.2L10 21h4l.5-2.6c.8-.3 1.5-.7 2.1-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/></symbol>
+    <symbol id="icon-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 10a6 6 0 1112 0c0 4.5 1.5 6 1.5 6h-15S6 14.5 6 10z"/><path d="M10 19a2 2 0 004 0"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icon-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l9.5 16.5H2.5z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.2" r="0.4" fill="currentColor"/></symbol>
+  </defs>
+</svg>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar__logo"><span class="sidebar__logo-mark">SC</span> StroyControl</div>
+    <nav>
+      <a href="./01-objects-dashboard.html" class="active"><svg class="icon"><use href="#icon-objects"/></svg> Объекты</a>
+      <a href="./03-tasks-kanban.html"><svg class="icon"><use href="#icon-tasks"/></svg> Задачи</a>
+      <a href="./04-photocontrol.html"><svg class="icon"><use href="#icon-camera"/></svg> Фотоконтроль</a>
+      <a href="#"><svg class="icon"><use href="#icon-video"/></svg> Видеонаблюдение</a>
+      <a href="./05-feed.html"><svg class="icon"><use href="#icon-feed"/></svg> Лента</a>
+      <a href="#"><svg class="icon"><use href="#icon-documents"/></svg> Документы</a>
+      <a href="#"><svg class="icon"><use href="#icon-finance"/></svg> Финансы</a>
+      <a href="#"><svg class="icon"><use href="#icon-supply"/></svg> Снабжение и склад</a>
+      <div class="sidebar__section">Прочее</div>
+      <a href="./06-customer-portal.html"><svg class="icon"><use href="#icon-customer"/></svg> Кабинет заказчика</a>
+      <a href="#"><svg class="icon"><use href="#icon-settings"/></svg> Администрирование</a>
+    </nav>
+    <div class="sidebar__user">
+      <div class="avatar">РБ</div>
+      <div>
+        <div style="color:#fff;font-size:13px;font-weight:600;">Рустам Бек</div>
+        <div style="font-size:11.5px;">Руководитель проекта</div>
+      </div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <h1>Объекты</h1>
+      <div class="topbar__actions">
+        <button class="icon-btn"><svg class="icon"><use href="#icon-search"/></svg></button>
+        <button class="icon-btn"><svg class="icon"><use href="#icon-bell"/></svg><span class="icon-btn__dot"></span></button>
+        <button class="btn btn--primary"><svg class="icon" style="width:14px;height:14px;"><use href="#icon-plus"/></svg> Новый объект</button>
+      </div>
+    </div>
+    <div class="content">
+      <div class="grid kpi-row">
+        <div class="card kpi"><div class="kpi__icon" style="background:var(--color-primary-soft);color:var(--color-primary);"><svg><use href="#icon-objects"/></svg></div><div><div class="kpi__label">Активных объектов</div><div class="kpi__value">12</div></div></div>
+        <div class="card kpi"><div class="kpi__icon" style="background:var(--color-success-soft);color:var(--color-success);"><svg><use href="#icon-tasks"/></svg></div><div><div class="kpi__label">Задач в работе</div><div class="kpi__value">341</div></div></div>
+        <div class="card kpi"><div class="kpi__icon" style="background:var(--color-danger-soft);color:var(--color-danger);"><svg><use href="#icon-warning"/></svg></div><div><div class="kpi__label">Риск срыва срока</div><div class="kpi__value" style="color:var(--color-danger)">3</div></div></div>
+        <div class="card kpi"><div class="kpi__icon" style="background:var(--color-warning-soft);color:var(--color-warning);"><svg><use href="#icon-camera"/></svg></div><div><div class="kpi__label">Открытых замечаний</div><div class="kpi__value" style="color:var(--color-warning)">27</div></div></div>
+      </div>
+
+      <div class="grid obj-grid">
+        <div class="card obj-card">
+          <div class="obj-card__thumb"><svg class="icon"><use href="#icon-objects"/></svg></div>
+          <h3 class="obj-card__title">ЖК «Тошкент Сити», корп. 2</h3>
+          <p class="obj-card__addr">г. Ташкент, Мирабадский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:64%"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 64%</span><span class="badge badge--success">В графике</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb"><svg class="icon"><use href="#icon-objects"/></svg></div>
+          <h3 class="obj-card__title">Малоэтажный ЖК «Оазис»</h3>
+          <p class="obj-card__addr">г. Ташкент, Юнусабадский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:38%;background:var(--color-warning)"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 38%</span><span class="badge badge--warning">Риск сдвига</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb"><svg class="icon"><use href="#icon-objects"/></svg></div>
+          <h3 class="obj-card__title">Реконструкция офиса «Bekzod Plaza»</h3>
+          <p class="obj-card__addr">г. Ташкент, Яшнабадский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:81%"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 81%</span><span class="badge badge--success">В графике</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb"><svg class="icon"><use href="#icon-objects"/></svg></div>
+          <h3 class="obj-card__title">Складской комплекс «Логистик-1»</h3>
+          <p class="obj-card__addr">Ташкентская обл., Кибрайский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:22%;background:var(--color-danger)"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 22%</span><span class="badge badge--danger">Срыв срока</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb"><svg class="icon"><use href="#icon-objects"/></svg></div>
+          <h3 class="obj-card__title">Коттеджный посёлок «Зелёный берег»</h3>
+          <p class="obj-card__addr">Ташкентская обл., Бостанлыкский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:55%"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 55%</span><span class="badge badge--success">В графике</span></div>
+        </div>
+        <div class="card obj-card">
+          <div class="obj-card__thumb"><svg class="icon"><use href="#icon-objects"/></svg></div>
+          <h3 class="obj-card__title">Бизнес-центр «Sputnik Tower»</h3>
+          <p class="obj-card__addr">г. Ташкент, Шайхантахурский р-н</p>
+          <div class="progress"><div class="progress__bar" style="width:47%"></div></div>
+          <div class="obj-card__meta"><span>Прогресс 47%</span><span class="badge badge--success">В графике</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
