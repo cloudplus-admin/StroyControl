@@ -17,6 +17,12 @@
   .pay-row { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--color-border); font-size:13px; }
   .photo-ph { display:flex; align-items:center; justify-content:center; color:#a9bdf0; transition: transform .2s ease; cursor:pointer; }
   .photo-ph:hover { transform: scale(1.03); }
+  .mini-photo-grid { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 768px) {
+    .hero { flex-direction: column; align-items: flex-start; gap: 14px; padding: 20px; }
+    .hero .progress { width: 100%; }
+    .mini-photo-grid { grid-template-columns: repeat(2, 1fr); }
+  }
 </style>
 </head>
 <body>
@@ -50,6 +56,15 @@
       </div>
     </div>
   </aside>
+  <nav class="bottom-nav">
+    <div class="bottom-nav__list">
+      <a href="./06-customer-portal.html" class="active"><svg class="icon"><use href="#icon-objects"/></svg>Объект</a>
+      <a href="./02-object-gantt.html"><svg class="icon"><use href="#icon-tasks"/></svg>График</a>
+      <a href="./04-photocontrol.html"><svg class="icon"><use href="#icon-camera"/></svg>Фото</a>
+      <a href="#"><svg class="icon"><use href="#icon-finance"/></svg>Оплаты</a>
+      <a href="./05-feed.html"><svg class="icon"><use href="#icon-feed"/></svg>Чат</a>
+    </div>
+  </nav>
   <div class="main">
     <div class="topbar">
       <h1>Кабинет заказчика</h1>
@@ -70,7 +85,7 @@
         <div>
           <div class="card" style="padding:16px 20px; margin-bottom:16px;">
             <h3 style="font-size:13.5px; margin:0 0 4px;">Последние фотоотчёты</h3>
-            <div class="grid" style="grid-template-columns:repeat(4,1fr); margin-top:10px;">
+            <div class="grid mini-photo-grid" style="margin-top:10px;">
               <div class="photo-ph" style="aspect-ratio:4/3;border-radius:8px;background:linear-gradient(135deg,#eef4ff,#dfe8fb);"><svg class="icon"><use href="#icon-camera"/></svg></div>
               <div class="photo-ph" style="aspect-ratio:4/3;border-radius:8px;background:linear-gradient(135deg,#eef4ff,#dfe8fb);"><svg class="icon"><use href="#icon-camera"/></svg></div>
               <div class="photo-ph" style="aspect-ratio:4/3;border-radius:8px;background:linear-gradient(135deg,#eef4ff,#dfe8fb);"><svg class="icon"><use href="#icon-camera"/></svg></div>

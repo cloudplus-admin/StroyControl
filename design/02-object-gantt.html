@@ -23,6 +23,15 @@
   .legend { display:flex; gap:16px; font-size:12.5px; color:var(--color-text-muted); margin-bottom:16px; flex-wrap:wrap; }
   .legend span { display:inline-flex; align-items:center; gap:6px; }
   .dot { width:10px;height:10px;border-radius:3px; }
+  .gantt-scroll { overflow: hidden; border-radius: var(--radius-md); }
+  .view-switch { display: flex; gap: 8px; }
+  @media (max-width: 768px) {
+    .gantt-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+    .gantt, .months { grid-template-columns: 160px 1fr; }
+    .topbar { height: auto; min-height: 56px; flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
+    .view-switch { display: none; }
+    .legend { gap: 10px; font-size: 11.5px; }
+  }
 </style>
 </head>
 <body>
@@ -68,13 +77,22 @@
       </div>
     </div>
   </aside>
+  <nav class="bottom-nav">
+    <div class="bottom-nav__list">
+      <a href="./01-objects-dashboard.html" class="active"><svg class="icon"><use href="#icon-objects"/></svg>Объекты</a>
+      <a href="./03-tasks-kanban.html"><svg class="icon"><use href="#icon-tasks"/></svg>Задачи</a>
+      <a href="./04-photocontrol.html"><svg class="icon"><use href="#icon-camera"/></svg>Фото</a>
+      <a href="./05-feed.html"><svg class="icon"><use href="#icon-feed"/></svg>Лента</a>
+      <a href="#"><svg class="icon"><use href="#icon-documents"/></svg>Ещё</a>
+    </div>
+  </nav>
   <div class="main">
     <div class="topbar">
       <div>
         <div class="topbar__breadcrumb"><a href="./01-objects-dashboard.html" style="color:inherit;text-decoration:none;">Объекты</a> / ЖК «Тошкент Сити», корп. 2</div>
         <h1>План-график</h1>
       </div>
-      <div style="display:flex; gap:8px;">
+      <div class="view-switch">
         <a class="btn" href="./03-tasks-kanban.html">Канбан</a>
         <button class="btn">Календарь</button>
         <button class="btn btn--primary">Гант ✓</button>
@@ -88,7 +106,7 @@
         <span><i class="dot" style="background:var(--color-danger)"></i>Просрочено</span>
         <span><i class="dot" style="background:#d0d5dd"></i>Baseline (план)</span>
       </div>
-      <div class="card" style="overflow:hidden;">
+      <div class="card gantt-scroll">
         <div class="months">
           <div></div>
           <div class="months__inner">

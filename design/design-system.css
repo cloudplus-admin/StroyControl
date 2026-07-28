@@ -361,3 +361,137 @@ body {
 .bar:hover {
   filter: brightness(1.08);
 }
+
+/* ==========================================================================
+   Мобильная адаптация (экраны APK/телефона)
+   Десктопный левый сайдбар скрывается, вместо него — нижняя навигация,
+   как в обычных мобильных приложениях. Многоколоночные сетки сворачиваются
+   в одну колонку; таблично-широкие вещи (Гант, канбан) скроллятся по
+   горизонтали вместо сжатия в нечитаемый вид.
+   ========================================================================== */
+
+.bottom-nav {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  background: rgba(17, 24, 39, 0.97);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -4px 16px rgba(16, 24, 40, 0.12);
+}
+
+.bottom-nav__list {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-around;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.bottom-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  padding: 6px 2px;
+  color: #9ca3af;
+  text-decoration: none;
+  font-size: 10.5px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.bottom-nav a .icon {
+  width: 21px;
+  height: 21px;
+}
+
+.bottom-nav a:active {
+  transform: scale(0.94);
+}
+
+.bottom-nav a.active {
+  color: #ffffff;
+}
+
+.bottom-nav a.active .icon {
+  color: var(--color-primary);
+  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.5));
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+
+  .bottom-nav {
+    display: block;
+  }
+
+  .layout {
+    flex-direction: column;
+  }
+
+  .topbar {
+    height: 56px;
+    padding: 0 14px;
+  }
+
+  .topbar h1 {
+    font-size: 16px;
+  }
+
+  .topbar__breadcrumb {
+    font-size: 11.5px;
+  }
+
+  .topbar__actions .btn span {
+    display: none;
+  }
+
+  .content {
+    padding: 14px;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Многоколоночные сетки -> одна колонка на телефоне */
+  .kpi-row,
+  .obj-grid,
+  .photo-grid,
+  .cols,
+  .split {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Канбан-доска и диаграмма Ганта на телефоне скроллятся по горизонтали,
+     а не сжимаются в нечитаемый вид */
+  .board {
+    display: flex !important;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    gap: 12px;
+    margin: 0 -14px;
+    padding: 0 14px 8px;
+  }
+
+  .board > div {
+    flex: 0 0 82%;
+    scroll-snap-align: start;
+  }
+
+  .months,
+  .gantt {
+    min-width: 640px;
+  }
+}
