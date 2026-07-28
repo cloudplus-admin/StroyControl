@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
-import { createPhotoReportSchema, createDefectSchema, updateDefectSchema } from './schemas';
+import { createPhotoReportSchema, createDefectSchema, updateDefectSchema, linkDocumentSchema } from './schemas';
 import * as photocontrolService from './service';
 
 export const photocontrolRouter = Router();
@@ -96,6 +96,19 @@ photocontrolRouter.post('/objects/:objectId/defects', async (req, res, next) => 
     const defect = await photocontrolService.createDefect(companyId, req.params.objectId, input);
     if (!defect) return res.status(404).json({ error: 'not_found' });
     res.status(201).json(defect);
+  } catch (err) {
+    if (handleZodError(err, res, next)) return;
+  }
+});
+
+photocontrolRouter.patch('/photo-reports/:id/link-document', async (req, res, next) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+    const input = linkDocumentSchema.parse(req.body);
+    const report = await photocontrolService.linkPhotoReportToDocument(companyId, req.params.id, input.documentId);
+    if (!report) return res.status(404).json({ error: 'not_found' });
+    res.json(report);
   } catch (err) {
     if (handleZodError(err, res, next)) return;
   }

@@ -3,6 +3,7 @@ import { objectsRouter } from './modules/objects/router';
 import { tasksRouter } from './modules/tasks/router';
 import { photocontrolRouter } from './modules/photocontrol/router';
 import { feedRouter } from './modules/feed/router';
+import { documentsRouter } from './modules/documents/router';
 
 export function createApp() {
   const app = express();
@@ -16,6 +17,7 @@ export function createApp() {
   app.use('/api/tasks', tasksRouter);
   app.use('/api', photocontrolRouter);
   app.use('/api', feedRouter);
+  app.use('/api', documentsRouter);
 
   return app;
 }

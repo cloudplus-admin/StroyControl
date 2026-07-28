@@ -25,3 +25,9 @@ export const createDefectSchema = z.object({
 export const updateDefectSchema = z.object({
   status: z.enum(['open', 'in_progress', 'verified', 'closed']),
 });
+
+// Привязка фотофиксации к акту выполненных работ (формы РУз, раздел 6 ТЗ),
+// модуль «Документооборот».
+export const linkDocumentSchema = z.object({
+  documentId: z.string().uuid(),
+});

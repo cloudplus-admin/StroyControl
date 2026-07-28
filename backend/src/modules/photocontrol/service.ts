@@ -66,6 +66,18 @@ export async function createDefect(
   return prisma.defect.create({ data: { objectId, ...input } });
 }
 
+/**
+ * Привязка фотофиксации к акту выполненных работ (документ типа `act`,
+ * модуль «Документооборот», формы РУз раздел 6 ТЗ).
+ */
+export async function linkPhotoReportToDocument(companyId: string, photoReportId: string, documentId: string) {
+  const photoReport = await prisma.photoReport.findFirst({ where: { id: photoReportId, object: { companyId } } });
+  if (!photoReport) return null;
+  const document = await prisma.document.findFirst({ where: { id: documentId, objectId: photoReport.objectId } });
+  if (!document) return null;
+  return prisma.photoReport.update({ where: { id: photoReportId }, data: { documentId } });
+}
+
 export async function updateDefectStatus(companyId: string, defectId: string, status: string) {
   const defect = await prisma.defect.findFirst({ where: { id: defectId, object: { companyId } } });
   if (!defect) return null;

@@ -43,6 +43,7 @@ model User {
   reportedDefects      Defect[]
   feedEvents           FeedEvent[]
   feedReactions        FeedReaction[]
+  uploadedDocumentVersions DocumentVersion[]
 
   @@map("users")
 }
@@ -60,6 +61,7 @@ model Object {
   photoReports PhotoReport[]
   defects      Defect[]
   feedEvents   FeedEvent[]
+  documents    Document[]
 
   @@map("objects")
 }
@@ -150,10 +152,13 @@ model PhotoReport {
   geoLat             Float?   @map("geo_lat")
   geoLng             Float?   @map("geo_lng")
   inspectorSignature String?  @map("inspector_signature")
+  documentId         String?  @map("document_id") // привязка к акту выполненных работ (модуль «Документооборот»)
+  document           Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
   createdAt          DateTime @default(now()) @map("created_at")
 
   @@index([objectId])
   @@index([taskId])
+  @@index([documentId])
   @@map("photo_reports")
 }
 
@@ -205,4 +210,39 @@ model FeedReaction {
 
   @@unique([eventId, userId])
   @@map("feed_reactions")
+}
+
+// Документооборот: хранилище документов с версионностью (чертежи, сметы,
+// договоры, акты, исполнительная документация). Реальная загрузка файлов (S3)
+// не реализована — API принимает уже готовый fileUrl, как и в photocontrol.
+model Document {
+  id           String            @id @default(uuid())
+  objectId     String            @map("object_id")
+  object       Object            @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  title        String
+  docType      String            @map("doc_type") // drawing | estimate | contract | act | as_built | certificate
+  templateCode String?           @map("template_code") // код шаблона акта/справки под формы РУз (раздел 9 ТЗ), без генерации PDF
+  createdAt    DateTime          @default(now()) @map("created_at")
+  versions     DocumentVersion[]
+  photoReports PhotoReport[]
+
+  @@index([objectId])
+  @@map("documents")
+}
+
+// Версии документа — контроль версий и история изменений (кто и когда менял).
+// Этап 2: э-подпись и маршруты согласования версий не реализованы.
+model DocumentVersion {
+  id           String   @id @default(uuid())
+  documentId   String   @map("document_id")
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  versionNo    Int      @map("version_no")
+  fileUrl      String   @map("file_url")
+  uploadedById String   @map("uploaded_by")
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([documentId, versionNo])
+  @@index([documentId])
+  @@map("document_versions")
 }
