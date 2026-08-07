@@ -91,7 +91,7 @@ const tabsByRole: Record<Role, Tab[]> = {
   director: ['home', 'objects', 'tasks', 'feed', 'profile'],
   pm: ['home', 'objects', 'tasks', 'feed', 'profile'],
   foreman: ['home', 'objects', 'tasks', 'feed', 'profile'],
-  inspector: ['home', 'objects', 'tasks', 'feed', 'profile'],
+  inspector: ['home', 'tasks', 'quality', 'feed', 'profile'],
   supplier: ['home', 'objects', 'profile'],
   finance: ['home', 'objects', 'feed', 'profile'],
   customer: ['home', 'objects', 'tasks', 'feed', 'profile'],

@@ -12,6 +12,7 @@ type BootstrapResponse = { serverTime: string; reviewers?: { id: string; name: s
 
 function mapStatus(status: string): Task['status'] {
   if (status === 'done') return 'done';
+  if (status === 'review') return 'review';
   if (status === 'in_progress') return 'in_progress';
   return 'open';
 }

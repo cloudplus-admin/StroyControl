@@ -20,6 +20,11 @@ describe('mergeBootstrap', () => {
     expect(mergeBootstrap(seedData, withPhotos).tasks[0]?.photoUris).toEqual(['https://cdn.test/1.jpg', 'https://cdn.test/2.jpg']);
   });
 
+  it('keeps a server task awaiting inspector review actionable', () => {
+    const awaitingReview = { ...response, objects: [{ ...response.objects[0]!, tasks: [{ ...response.objects[0]!.tasks[0]!, status: 'review' }] }] };
+    expect(mergeBootstrap(seedData, awaitingReview).tasks[0]?.status).toBe('review');
+  });
+
   it('keeps an offline-closed task in review until its queue is sent', () => {
     const base = { ...seedData, tasks: [{ ...seedData.tasks[0]!, id: 'server-task' }] };
     const queued = closeTask(base, 'server-task', 'file:///photo.jpg', 41.3, 69.2);
