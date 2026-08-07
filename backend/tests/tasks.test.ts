@@ -65,7 +65,7 @@ describe('Task checklist and closure', () => {
     expect(closeRes.status).toBe(400);
   });
 
-  it('submits a task with photo and geotag for review', async () => {
+  it('submits a task with multiple photos and geotag for review', async () => {
     const { company, sectionId } = await seedCompanyWithSection();
     const taskRes = await request(app)
       .post(`/api/objects/sections/${sectionId}/tasks`)
@@ -76,11 +76,12 @@ describe('Task checklist and closure', () => {
       .post(`/api/tasks/${taskRes.body.id}/close`)
       .set('x-company-id', company.id)
       .set('idempotency-key', 'close-task-from-site-1')
-      .send({ photoUrl: 'https://example.com/photo.jpg', geoLat: 41.3, geoLng: 69.2 });
+      .send({ photoUrls: ['https://example.com/photo-1.jpg', 'https://example.com/photo-2.jpg'], geoLat: 41.3, geoLng: 69.2 });
 
     expect(closeRes.status).toBe(200);
     expect(closeRes.body.status).toBe('review');
-    expect(closeRes.body.closurePhotoUrl).toBe('https://example.com/photo.jpg');
+    expect(closeRes.body.closurePhotoUrl).toBe('https://example.com/photo-1.jpg');
+    expect(closeRes.body.closurePhotos).toEqual(['https://example.com/photo-1.jpg', 'https://example.com/photo-2.jpg']);
   });
 
   it('replays the same offline close operation without duplicate side effects', async () => {

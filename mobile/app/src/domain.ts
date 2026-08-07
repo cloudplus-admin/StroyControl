@@ -34,6 +34,7 @@ export type Task = {
   status: TaskStatus;
   checklist: ChecklistItem[];
   photoUri?: string;
+  photoUris?: string[];
   latitude?: number;
   longitude?: number;
   reviewNote?: string;
@@ -69,7 +70,7 @@ export type QueueItem = {
   attempts: number;
   nextAttemptAt?: string;
   lastError?: string;
-  payload?: { photoUrl: string; geoLat: number; geoLng: number } | { decision: 'accepted' | 'rejected'; note: string };
+  payload?: { photoUrls: string[]; geoLat: number; geoLng: number } | { decision: 'accepted' | 'rejected'; note: string };
 };
 
 export type FeedMessage = { id: string; projectId: string; author: string; text: string; createdAt: string; parentId?: string; attachmentName?: string; reactions: number };
@@ -165,13 +166,15 @@ export function toggleChecklist(data: AppData, taskId: string, checklistId: stri
   return enqueue({ ...data, tasks }, 'task.updated', taskId);
 }
 
-export function closeTask(data: AppData, taskId: string, photoUri: string, latitude: number, longitude: number, now = new Date().toISOString()): AppData {
+export function closeTask(data: AppData, taskId: string, photoUris: string[] | string, latitude: number, longitude: number, now = new Date().toISOString()): AppData {
+  const photos = (Array.isArray(photoUris) ? photoUris : [photoUris]).filter(Boolean).slice(0, 10);
+  if (!photos.length) return data;
   const tasks = data.tasks.map((task) => task.id !== taskId ? task : {
-    ...task, status: 'review' as const, photoUri, latitude, longitude,
+    ...task, status: 'review' as const, photoUri: photos[0], photoUris: photos, latitude, longitude,
     checklist: task.checklist.map((item) => ({ ...item, done: true }))
   });
   const next = enqueue({ ...data, tasks }, 'task.closed', taskId, now);
-  return { ...next, queue: next.queue.map((item, index) => index === next.queue.length - 1 ? { ...item, payload: { photoUrl: photoUri, geoLat: latitude, geoLng: longitude } } : item) };
+  return { ...next, queue: next.queue.map((item, index) => index === next.queue.length - 1 ? { ...item, payload: { photoUrls: photos, geoLat: latitude, geoLng: longitude } } : item) };
 }
 
 export function reviewTask(data: AppData, taskId: string, decision: 'accepted' | 'rejected', note: string, now = new Date().toISOString(), lang: Lang = 'ru'): AppData {

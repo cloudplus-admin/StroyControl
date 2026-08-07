@@ -28,10 +28,13 @@ export const toggleChecklistItemSchema = z.object({
 });
 
 export const closeTaskSchema = z.object({
-  photoUrl: z.string().url(),
+  photoUrl: z.string().url().optional(),
+  photoUrls: z.array(z.string().url()).min(1).max(10).optional(),
   geoLat: z.number().min(-90).max(90),
   geoLng: z.number().min(-180).max(180),
-});
+}).superRefine((value, ctx) => {
+  if (!value.photoUrl && !value.photoUrls?.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['photoUrls'], message: 'At least one photo is required' });
+}).transform((value) => ({ photoUrls: value.photoUrls?.length ? value.photoUrls : [value.photoUrl!], geoLat: value.geoLat, geoLng: value.geoLng }));
 
 export const reviewTaskSchema = z.object({
   decision: z.enum(['accepted', 'rejected']),

@@ -42,7 +42,7 @@ mobileRouter.get('/bootstrap', async (req, res, next) => {
       const tasks = object.stages.flatMap((stage) => stage.sections.flatMap((section) => section.tasks.map((task) => ({
         id: task.id, objectId: object.id, stage: localized(stage.name, stage.nameUz), section: localized(section.name, section.nameUz), title: localized(task.title, task.titleUz),
         due: task.plannedEnd?.toISOString().slice(0, 10) ?? '', priority: task.priority,
-        assignee: task.assignee?.fullName ?? '', status: task.status, closurePhotoUrl: task.closurePhotoUrl,
+        assignee: task.assignee?.fullName ?? '', status: task.status, closurePhotoUrl: task.closurePhotoUrl, closurePhotos: task.closurePhotos,
         closureGeoLat: task.closureGeoLat, closureGeoLng: task.closureGeoLng,
         reviewNote: task.reviewNote, reviewedAt: task.reviewedAt,
         reviewerId: task.reviewerId, reviewerName: task.reviewer?.fullName ?? null,

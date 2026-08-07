@@ -49,7 +49,7 @@ export async function toggleChecklistItem(
 export async function closeTask(
   companyId: string,
   taskId: string,
-  input: { photoUrl: string; geoLat: number; geoLng: number },
+  input: { photoUrls: string[]; geoLat: number; geoLng: number },
   options: { idempotencyKey: string; actorId?: string; roles?: { code: string; objectId: string | null }[] },
 ) {
   const requestHash = createHash('sha256').update(JSON.stringify({ taskId, ...input })).digest('hex');
@@ -69,17 +69,15 @@ export async function closeTask(
   });
   if (!task) return null;
   if (options.actorId) {
-    let uploadId: string;
-    try {
-      const pathname = new URL(input.photoUrl).pathname;
-      const match = pathname.match(/^\/api\/uploads\/([0-9a-f-]+)$/i);
-      if (!match) return { kind: 'invalid_upload' as const };
-      uploadId = match[1];
-    } catch {
-      return { kind: 'invalid_upload' as const };
-    }
-    const upload = await prisma.fileUpload.findFirst({ where: { id: uploadId, companyId, taskId } });
-    if (!upload) return { kind: 'invalid_upload' as const };
+    const uploadIds = input.photoUrls.map((photoUrl) => {
+      try {
+        const match = new URL(photoUrl).pathname.match(/^\/api\/uploads\/([0-9a-f-]+)$/i);
+        return match?.[1] ?? null;
+      } catch { return null; }
+    });
+    if (uploadIds.some((id) => !id)) return { kind: 'invalid_upload' as const };
+    const uploads = await prisma.fileUpload.count({ where: { id: { in: uploadIds as string[] }, companyId, taskId } });
+    if (uploads !== uploadIds.length) return { kind: 'invalid_upload' as const };
   }
   if (options.roles) {
     const objectId = task.workSection.stage.objectId;
@@ -97,7 +95,8 @@ export async function closeTask(
         data: {
           status: 'review',
           submittedAt: new Date(),
-          closurePhotoUrl: input.photoUrl,
+          closurePhotoUrl: input.photoUrls[0],
+          closurePhotos: input.photoUrls,
           closureGeoLat: input.geoLat,
           closureGeoLng: input.geoLng,
         },
@@ -119,7 +118,7 @@ export async function closeTask(
             action: 'task.close',
             entityType: 'task',
             entityId: taskId,
-            payload: { photoUrl: input.photoUrl, geoLat: input.geoLat, geoLng: input.geoLng },
+            payload: { photoUrls: input.photoUrls, geoLat: input.geoLat, geoLng: input.geoLng },
           },
         });
       }

@@ -10,9 +10,10 @@ describe('offline domain', () => {
   });
 
   it('requires field evidence in task close command', () => {
-    const result = closeTask(seedData, 't-101', 'file:///photo.jpg', 41.31, 69.28);
-    expect(result.tasks[0]).toMatchObject({ status: 'review', photoUri: 'file:///photo.jpg', latitude: 41.31, longitude: 69.28 });
+    const result = closeTask(seedData, 't-101', ['file:///photo-1.jpg', 'file:///photo-2.jpg'], 41.31, 69.28);
+    expect(result.tasks[0]).toMatchObject({ status: 'review', photoUri: 'file:///photo-1.jpg', photoUris: ['file:///photo-1.jpg', 'file:///photo-2.jpg'], latitude: 41.31, longitude: 69.28 });
     expect(result.queue.at(-1)?.type).toBe('task.closed');
+    expect(result.queue.at(-1)?.payload).toMatchObject({ photoUrls: ['file:///photo-1.jpg', 'file:///photo-2.jpg'] });
   });
 
   it('creates defect and queue item', () => {

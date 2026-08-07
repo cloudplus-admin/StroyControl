@@ -15,6 +15,11 @@ describe('mergeBootstrap', () => {
     expect(result.defects[0]).toMatchObject({ id: 'defect-1', status: 'fixing' });
   });
 
+  it('maps all task closure photos from bootstrap', () => {
+    const withPhotos = { ...response, objects: [{ ...response.objects[0]!, tasks: [{ ...response.objects[0]!.tasks[0]!, closurePhotos: ['https://cdn.test/1.jpg', 'https://cdn.test/2.jpg'] }] }] };
+    expect(mergeBootstrap(seedData, withPhotos).tasks[0]?.photoUris).toEqual(['https://cdn.test/1.jpg', 'https://cdn.test/2.jpg']);
+  });
+
   it('keeps an offline-closed task in review until its queue is sent', () => {
     const base = { ...seedData, tasks: [{ ...seedData.tasks[0]!, id: 'server-task' }] };
     const queued = closeTask(base, 'server-task', 'file:///photo.jpg', 41.3, 69.2);

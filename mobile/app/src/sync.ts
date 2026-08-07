@@ -55,17 +55,22 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
     if (!['task.closed', 'task.reviewed'].includes(item.type) || !item.payload) { queue.push(item); continue; }
     let current = item;
     try {
-      if (item.type === 'task.closed' && 'photoUrl' in item.payload && (item.payload.photoUrl.startsWith('file://') || item.payload.photoUrl.startsWith('content://'))) {
-        const local = await fetch(item.payload.photoUrl);
-        if (!local.ok) throw new Error('sync_local_photo_unreadable');
-        const blob = await local.blob();
-        const mimeType = blob.type && ['image/jpeg', 'image/png', 'image/webp'].includes(blob.type) ? blob.type : 'image/jpeg';
-        const upload = await api.request('/api/uploads', {
-          method: 'POST', headers: { 'content-type': mimeType, 'idempotency-key': `${item.idempotencyKey}:photo`, 'x-task-id': item.entityId, 'x-file-name': `task-${item.entityId}.${mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg'}` }, body: blob,
-        });
-        if (!upload.ok) throw new Error(`Upload HTTP ${upload.status}`);
-        const uploaded = await upload.json() as { url: string };
-        current = { ...item, payload: { ...item.payload, photoUrl: uploaded.url } };
+      if (item.type === 'task.closed' && 'photoUrls' in item.payload) {
+        const photoUrls = [...item.payload.photoUrls];
+        for (let index = 0; index < photoUrls.length; index += 1) {
+          const photoUrl = photoUrls[index]!;
+          if (!photoUrl.startsWith('file://') && !photoUrl.startsWith('content://')) continue;
+          const local = await fetch(photoUrl);
+          if (!local.ok) throw new Error('sync_local_photo_unreadable');
+          const blob = await local.blob();
+          const mimeType = blob.type && ['image/jpeg', 'image/png', 'image/webp'].includes(blob.type) ? blob.type : 'image/jpeg';
+          const upload = await api.request('/api/uploads', {
+            method: 'POST', headers: { 'content-type': mimeType, 'idempotency-key': `${item.idempotencyKey}:photo:${index}`, 'x-task-id': item.entityId, 'x-file-name': `task-${item.entityId}-${index + 1}.${mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg'}` }, body: blob,
+          });
+          if (!upload.ok) throw new Error(`Upload HTTP ${upload.status}`);
+          photoUrls[index] = (await upload.json() as { url: string }).url;
+          current = { ...current, payload: { ...item.payload, photoUrls: [...photoUrls] } };
+        }
       }
       const endpoint = item.type === 'task.reviewed' ? 'review' : 'close';
       const response = await api.request(`/api/tasks/${encodeURIComponent(item.entityId)}/${endpoint}`, {

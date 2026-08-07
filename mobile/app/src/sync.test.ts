@@ -28,16 +28,20 @@ describe('syncQueue', () => {
     expect(result.queue[0]?.status).toBe('conflict');
   });
 
-  it('загружает локальное фото перед закрытием и не загружает его повторно после ошибки close', async () => {
-    const queued = closeTask(seedData, 't-101', 'file:///photo.jpg', 41.3, 69.2);
+  it('загружает несколько локальных фото перед закрытием и сохраняет загруженные URL после ошибки close', async () => {
+    const queued = closeTask(seedData, 't-101', ['file:///photo-1.jpg', 'file:///photo-2.jpg'], 41.3, 69.2);
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response(new Blob(['image'], { type: 'image/jpeg' }), { status: 200 })) as typeof fetch;
+    globalThis.fetch = vi.fn().mockImplementation(async () => new Response(new Blob(['image'], { type: 'image/jpeg' }), { status: 200 })) as typeof fetch;
     const request = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ url: 'https://api.test/api/uploads/u1' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ url: 'https://api.test/api/uploads/u2' }), { status: 201 }))
       .mockRejectedValueOnce(new Error('close offline'));
     const first = await syncQueue(queued, { request } as unknown as ApiClient, Date.now());
-    expect(first.queue[0]?.payload && 'photoUrl' in first.queue[0].payload ? first.queue[0].payload.photoUrl : undefined).toBe('https://api.test/api/uploads/u1');
+    expect(first.queue[0]?.payload && 'photoUrls' in first.queue[0].payload ? first.queue[0].payload.photoUrls : undefined).toEqual(['https://api.test/api/uploads/u1', 'https://api.test/api/uploads/u2']);
     expect(request.mock.calls[0]?.[0]).toBe('/api/uploads');
+    const retryRequest = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    expect((await syncQueue({ ...first, queue: first.queue.map((item) => ({ ...item, nextAttemptAt: undefined })) }, { request: retryRequest } as unknown as ApiClient, Date.now())).queue).toHaveLength(0);
+    expect(retryRequest).toHaveBeenCalledTimes(1);
     globalThis.fetch = originalFetch;
   });
 

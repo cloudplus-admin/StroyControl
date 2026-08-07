@@ -217,6 +217,7 @@ model Task {
   isRecurring      Boolean     @default(false) @map("is_recurring")
   recurrenceRule   String?     @map("recurrence_rule")
   closurePhotoUrl  String?     @map("closure_photo_url")
+  closurePhotos    Json        @default("[]") @map("closure_photos")
   closureGeoLat    Float?      @map("closure_geo_lat")
   closureGeoLng    Float?      @map("closure_geo_lng")
   closedAt         DateTime?   @map("closed_at")

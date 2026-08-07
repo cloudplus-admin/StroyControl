@@ -737,6 +737,7 @@ function TasksScreen({
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [reviewNote, setReviewNote] = useState("");
+  const [draftPhotos, setDraftPhotos] = useState<string[]>([]);
   const [assigningReviewer, setAssigningReviewer] = useState(false);
   const allowed =
     role === "subcontractor" ? data.tasks.slice(0, 1) : data.tasks;
@@ -762,6 +763,7 @@ function TasksScreen({
     } finally { setAssigningReviewer(false); }
   };
   useEffect(() => { if (initialSelected) setSelected(initialSelected); }, [initialSelected]);
+  useEffect(() => { setDraftPhotos([]); }, [selected]);
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
@@ -799,14 +801,21 @@ function TasksScreen({
         };
   const capture = async () => {
     if (!task) return;
+    if (draftPhotos.length >= 10) return Alert.alert(t.attachedPhotos, t.photoLimit);
     const camera = await ImagePicker.requestCameraPermissionsAsync();
-    const geo = await Location.requestForegroundPermissionsAsync();
-    if (!camera.granted || !geo.granted)
+    if (!camera.granted)
       return Alert.alert(t.permissionsNeeded, t.permissionsBody);
     const photo = await ImagePicker.launchCameraAsync({ quality: 0.7 });
     if (photo.canceled) return;
     const asset = photo.assets[0];
     if (!asset) return;
+    setDraftPhotos((current) => [...current, asset.uri].slice(0, 10));
+  };
+  const submitPhotos = async () => {
+    if (!task) return;
+    if (!draftPhotos.length) return Alert.alert(t.attachedPhotos, t.photoRequired);
+    const geo = await Location.requestForegroundPermissionsAsync();
+    if (!geo.granted) return Alert.alert(t.permissionsNeeded, t.permissionsBody);
     const point = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.High,
     });
@@ -814,11 +823,12 @@ function TasksScreen({
       closeTask(
         data,
         task.id,
-        asset.uri,
+        draftPhotos,
         point.coords.latitude,
         point.coords.longitude,
       ),
     );
+    setDraftPhotos([]);
     Alert.alert(t.sentForReview, t.savedOffline);
   };
   if (task)
@@ -862,9 +872,10 @@ function TasksScreen({
             <Text style={[s.flex, x.done && s.strike]}>{x.text}</Text>
           </Pressable>
         ))}
-        {task.photoUri && (
+        {(task.photoUris?.length || task.photoUri) && (
           <View style={s.card}>
-            <PhotoViewer uri={task.photoUri} headers={accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined} />
+            <Text style={s.cardTitle}>{t.attachedPhotos}</Text>
+            {(task.photoUris?.length ? task.photoUris : [task.photoUri!]).map((uri, index) => <PhotoViewer key={`${uri}:${index}`} uri={uri} compact headers={accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined} />)}
             <GeoPoint lang={lang} latitude={task.latitude} longitude={task.longitude} />
           </View>
         )}
@@ -881,9 +892,12 @@ function TasksScreen({
           </View>
         )}
         {['foreman', 'subcontractor', 'pm', 'admin', 'director'].includes(role) && task.status !== "review" && task.status !== "done" && (
-          <Pressable style={s.primary} onPress={capture}>
-            <Text style={s.primaryText}>{t.closeWithPhoto}</Text>
-          </Pressable>
+          <View style={s.card}>
+            {!!draftPhotos.length && <Text style={s.cardTitle}>{t.attachedPhotos}: {draftPhotos.length}/10</Text>}
+            {draftPhotos.map((uri, index) => <View key={`${uri}:${index}`}><PhotoViewer uri={uri} compact /><Pressable style={s.outlineInline} onPress={() => setDraftPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))}><Text style={s.outlineText}>{t.removePhoto}</Text></Pressable></View>)}
+            <Pressable style={s.outline} onPress={capture}><Text style={s.outlineText}>{t.closeWithPhoto}</Text></Pressable>
+            {!!draftPhotos.length && <Pressable style={s.primary} onPress={submitPhotos}><Text style={s.primaryText}>{t.submitWithPhotos}</Text></Pressable>}
+          </View>
         )}
         {role === "inspector" && task.status === "review" && (
           <View style={s.card}>
