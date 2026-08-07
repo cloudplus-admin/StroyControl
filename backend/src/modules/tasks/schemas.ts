@@ -10,7 +10,7 @@ export const updateTaskSchema = z.object({
   assigneeId: z.string().uuid().nullable().optional(),
   tags: z.array(z.string().min(1).max(40)).optional(),
   plannedStart: isoDate.optional(),
-  plannedEnd: isoDate.optional(),
+  plannedEnd: isoDate.nullable().optional(),
   actualStart: isoDate.optional(),
   actualEnd: isoDate.optional(),
   dependsOn: z.array(z.string().uuid()).optional(),

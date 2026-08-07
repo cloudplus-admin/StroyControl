@@ -1,7 +1,7 @@
 import { ApiClient } from './api';
 import { AppData, Defect, FeedMessage, Lang, Project, QualityReport, Task } from './domain';
 
-type ServerTask = { id: string; objectId: string; stage: string; title: string; due: string; priority: string; assignee: string; status: string; closurePhotoUrl?: string | null; closurePhotos?: string[] | null; closureGeoLat?: number | null; closureGeoLng?: number | null; reviewNote?: string | null; reviewerId?: string | null; reviewerName?: string | null; checklist: { id: string; text: string; done: boolean }[] };
+type ServerTask = { id: string; objectId: string; stage: string; title: string; description?: string; due: string; priority: string; assigneeId?: string | null; assignee: string; status: string; closurePhotoUrl?: string | null; closurePhotos?: string[] | null; closureGeoLat?: number | null; closureGeoLng?: number | null; reviewNote?: string | null; reviewerId?: string | null; reviewerName?: string | null; checklist: { id: string; text: string; done: boolean }[] };
 type ServerDocument = { id: string; objectId: string; name: string; version: number; uri: string; status: string; createdAt: string };
 type ServerAct = { id: string; objectId: string; template: string; number: string; title: string; amount: number; status: string; pdfUri?: string | null; signedAt?: string | null; createdAt: string };
 type ServerPhotoReport = { id: string; objectId: string; taskId?: string | null; point?: string | null; kind: string; fileUrl: string; requiredAngles?: string[]; photos?: { angle: string; uri: string }[]; status?: string; inspectorSignature?: string | null; inspectorNote?: string | null; reviewedAt?: string | null; createdAt: string };
@@ -26,8 +26,8 @@ export function mergeBootstrap(data: AppData, response: BootstrapResponse): AppD
     return { id: object.id, name: object.name, address: object.address, progress: object.progress, plan: object.progress, deadline: dueDates.at(-1) ?? '-', forecast: dueDates.at(-1) ?? '-', risk: object.tasks.some((task) => task.status === 'overdue') ? 'high' : 'low', tasksOpen: open, defectsOpen: 0 };
   });
   const tasks: Task[] = response.objects.flatMap((object) => object.tasks.map((task) => ({
-    id: task.id, projectId: task.objectId, title: task.title, stage: task.stage, due: task.due,
-    priority: task.priority === 'high' ? 'high' : task.priority === 'low' ? 'low' : 'medium', assignee: task.assignee,
+    id: task.id, projectId: task.objectId, title: task.title, description: task.description, stage: task.stage, due: task.due,
+    priority: task.priority === 'high' ? 'high' : task.priority === 'low' ? 'low' : 'medium', assigneeId: task.assigneeId ?? undefined, assignee: task.assignee,
     status: pendingReviews.get(task.id) === 'accepted' ? 'done' : pendingReviews.get(task.id) === 'rejected' ? 'in_progress' : pendingClosed.has(task.id) ? 'review' : mapStatus(task.status), checklist: task.checklist,
     photoUri: task.closurePhotos?.[0] ?? task.closurePhotoUrl ?? undefined, photoUris: task.closurePhotos?.length ? task.closurePhotos : task.closurePhotoUrl ? [task.closurePhotoUrl] : undefined, latitude: task.closureGeoLat ?? undefined, longitude: task.closureGeoLng ?? undefined,
     reviewNote: task.reviewNote ?? undefined,

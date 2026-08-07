@@ -27,10 +27,12 @@ export type Task = {
   id: string;
   projectId: string;
   title: string;
+  description?: string;
   stage: string;
   due: string;
   priority: 'low' | 'medium' | 'high';
   assignee: string;
+  assigneeId?: string;
   status: TaskStatus;
   checklist: ChecklistItem[];
   photoUri?: string;

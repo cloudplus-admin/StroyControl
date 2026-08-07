@@ -40,9 +40,9 @@ mobileRouter.get('/bootstrap', async (req, res, next) => {
     });
     return res.json({ serverTime: new Date().toISOString(), reviewers: reviewers.map((reviewer) => ({ id: reviewer.id, name: reviewer.fullName, objectIds: reviewer.roles.flatMap((role) => role.objectId ? [role.objectId] : []) })), objects: objects.map((object) => {
       const tasks = object.stages.flatMap((stage) => stage.sections.flatMap((section) => section.tasks.map((task) => ({
-        id: task.id, objectId: object.id, stage: localized(stage.name, stage.nameUz), section: localized(section.name, section.nameUz), title: localized(task.title, task.titleUz),
+        id: task.id, objectId: object.id, stage: localized(stage.name, stage.nameUz), section: localized(section.name, section.nameUz), title: localized(task.title, task.titleUz), description: localized(task.description ?? '', task.descriptionUz),
         due: task.plannedEnd?.toISOString().slice(0, 10) ?? '', priority: task.priority,
-        assignee: task.assignee?.fullName ?? '', status: task.status, closurePhotoUrl: task.closurePhotoUrl, closurePhotos: task.closurePhotos,
+        assigneeId: task.assigneeId, assignee: task.assignee?.fullName ?? '', status: task.status, closurePhotoUrl: task.closurePhotoUrl, closurePhotos: task.closurePhotos,
         closureGeoLat: task.closureGeoLat, closureGeoLng: task.closureGeoLng,
         reviewNote: task.reviewNote, reviewedAt: task.reviewedAt,
         reviewerId: task.reviewerId, reviewerName: task.reviewer?.fullName ?? null,

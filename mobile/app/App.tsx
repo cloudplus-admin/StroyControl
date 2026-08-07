@@ -749,8 +749,17 @@ function TasksScreen({
   const [createAssigneeId, setCreateAssigneeId] = useState("");
   const [createPriority, setCreatePriority] = useState<'low' | 'normal' | 'high'>('normal');
   const [createDeadline, setCreateDeadline] = useState("");
+  const [createChecklist, setCreateChecklist] = useState("");
   const [planningUsers, setPlanningUsers] = useState<PlanningUser[]>([]);
   const [planningSections, setPlanningSections] = useState<PlanningSection[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editAssigneeId, setEditAssigneeId] = useState("");
+  const [editPriority, setEditPriority] = useState<'low' | 'normal' | 'high'>('normal');
+  const [editDeadline, setEditDeadline] = useState("");
+  const [editChecklist, setEditChecklist] = useState("");
   const canCreate = ['admin', 'director', 'pm'].includes(role);
   const allowed =
     role === "subcontractor" ? data.tasks.slice(0, 1) : data.tasks;
@@ -761,6 +770,11 @@ function TasksScreen({
     : lang === "en"
       ? { assignError: "Could not assign inspector", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter", newTask: "Create task", title: "Task title", chooseObject: "Choose an object", chooseSection: "Choose a work section", chooseAssignee: "Choose an assignee", noAssignee: "Unassigned", deadlineHint: "Deadline: YYYY-MM-DD", create: "Create task", cancel: "Cancel", created: "Task created", createError: "Could not create task", required: "Enter a title, object and section", loading: "Loading data...", priority: "Priority" }
       : { assignError: "Не удалось назначить технадзор", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет", newTask: "Поставить задачу", title: "Название задачи", chooseObject: "Выберите объект", chooseSection: "Выберите раздел работ", chooseAssignee: "Выберите исполнителя", noAssignee: "Не назначен", deadlineHint: "Срок: ГГГГ-ММ-ДД", create: "Создать задачу", cancel: "Отмена", created: "Задача создана", createError: "Не удалось создать задачу", required: "Заполните название, объект и раздел", loading: "Загружаем данные...", priority: "Приоритет" };
+  const extra = lang === 'uz'
+    ? { description: "Tavsif", checklist: "Tekshiruv ro'yxati - har bir band yangi qatordan", edit: "Vazifani tahrirlash", save: "O'zgarishlarni saqlash", saved: "Vazifa yangilandi", saveError: "O'zgarishlarni saqlab bo'lmadi" }
+    : lang === 'en'
+      ? { description: 'Description', checklist: 'Checklist - one item per line', edit: 'Edit task', save: 'Save changes', saved: 'Task updated', saveError: 'Could not save changes' }
+      : { description: 'Описание', checklist: 'Чек-лист - каждый пункт с новой строки', edit: 'Редактировать задачу', save: 'Сохранить изменения', saved: 'Задача обновлена', saveError: 'Не удалось сохранить изменения' };
 
   const loadPlanning = async (project: string) => {
     if (!api || !project) return;
@@ -804,12 +818,48 @@ function TasksScreen({
         }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const created = await response.json() as { id: string };
+      for (const label of createChecklist.split('\n').map((item) => item.trim()).filter(Boolean)) {
+        const checklistResponse = await api.request(`/api/tasks/${encodeURIComponent(created.id)}/checklist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label }) });
+        if (!checklistResponse.ok) throw new Error(`Checklist HTTP ${checklistResponse.status}`);
+      }
       updateData(await refreshServerData(data, api, lang));
-      setCreateTitle(''); setCreateAssigneeId(''); setCreateDeadline(''); setCreatePriority('normal'); setShowCreate(false);
+      setCreateTitle(''); setCreateAssigneeId(''); setCreateDeadline(''); setCreateChecklist(''); setCreatePriority('normal'); setShowCreate(false);
       Alert.alert(c.created);
     } catch (error) {
       Alert.alert(c.createError, error instanceof Error ? error.message : c.serverError);
     } finally { setCreating(false); }
+  };
+
+  const beginEdit = () => {
+    if (!task) return;
+    setEditTitle(task.title); setEditDescription(task.description ?? ''); setEditAssigneeId(task.assigneeId ?? '');
+    setEditPriority(task.priority === 'medium' ? 'normal' : task.priority); setEditDeadline(task.due); setEditChecklist(''); setEditing(true);
+    if (!planningUsers.length && api) void api.request('/api/planning/users').then(async (response) => { if (response.ok) setPlanningUsers(await response.json() as PlanningUser[]); });
+  };
+
+  const saveEdit = async () => {
+    if (!task || !api || savingEdit || !editTitle.trim()) return;
+    setSavingEdit(true);
+    try {
+      const response = await api.request(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: editTitle.trim(), description: editDescription.trim(), assigneeId: editAssigneeId || null, priority: editPriority, plannedEnd: editDeadline.trim() || null }) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      for (const label of editChecklist.split('\n').map((item) => item.trim()).filter(Boolean)) {
+        const checklistResponse = await api.request(`/api/tasks/${encodeURIComponent(task.id)}/checklist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label }) });
+        if (!checklistResponse.ok) throw new Error(`Checklist HTTP ${checklistResponse.status}`);
+      }
+      updateData(await refreshServerData(data, api, lang)); setEditing(false); Alert.alert(extra.saved);
+    } catch (error) { Alert.alert(extra.saveError, error instanceof Error ? error.message : c.serverError); }
+    finally { setSavingEdit(false); }
+  };
+
+  const toggleChecklist = async (itemId: string, done: boolean) => {
+    if (!task || !api || task.status === 'review' || task.status === 'done') return;
+    try {
+      const response = await api.request(`/api/tasks/${encodeURIComponent(task.id)}/checklist/${encodeURIComponent(itemId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ isDone: done }) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      updateData({ ...data, tasks: data.tasks.map((value) => value.id === task.id ? { ...value, checklist: value.checklist.map((item) => item.id === itemId ? { ...item, done } : item) } : value) });
+    } catch (error) { Alert.alert(c.serverError, error instanceof Error ? error.message : c.serverError); }
   };
   const assignReviewer = async (reviewerId: string) => {
     if (!task || !api || assigningReviewer) return;
@@ -901,12 +951,28 @@ function TasksScreen({
           <Text style={s.link}>‹ {t.tasks}</Text>
         </Pressable>
         <Text style={s.h1}>{task.title}</Text>
+        {canCreate && !editing && <Pressable style={s.outline} onPress={beginEdit}><Text style={s.outlineText}>{extra.edit}</Text></Pressable>}
+        {canCreate && editing && <View style={s.card}>
+          <Text style={s.cardTitle}>{extra.edit}</Text>
+          <TextInput value={editTitle} onChangeText={setEditTitle} placeholder={c.title} style={s.input} />
+          <TextInput value={editDescription} onChangeText={setEditDescription} placeholder={extra.description} multiline style={s.input} />
+          <Text style={s.label}>{c.chooseAssignee}</Text>
+          <Pressable style={!editAssigneeId ? s.primary : s.outlineInline} onPress={() => setEditAssigneeId('')}><Text style={!editAssigneeId ? s.primaryText : s.outlineText}>{c.noAssignee}</Text></Pressable>
+          {planningUsers.map((user) => <Pressable key={user.id} style={user.id === editAssigneeId ? s.primary : s.outlineInline} onPress={() => setEditAssigneeId(user.id)}><Text style={user.id === editAssigneeId ? s.primaryText : s.outlineText}>{user.fullName}</Text></Pressable>)}
+          <Text style={s.label}>{c.priority}</Text>
+          <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === editPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setEditPriority(priority)}><Text style={priority === editPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
+          <TextInput value={editDeadline} onChangeText={setEditDeadline} placeholder={c.deadlineHint} autoCapitalize="none" style={s.input} />
+          <TextInput value={editChecklist} onChangeText={setEditChecklist} placeholder={extra.checklist} multiline style={s.input} />
+          <Pressable disabled={savingEdit} style={s.primary} onPress={() => void saveEdit()}><Text style={s.primaryText}>{savingEdit ? c.loading : extra.save}</Text></Pressable>
+          <Pressable disabled={savingEdit} style={s.outline} onPress={() => setEditing(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
+        </View>}
         <View style={s.card}>
           <Line
             k={t.object}
             v={data.projects.find((p) => p.id === task.projectId)?.name ?? "-"}
           />
           <Line k={t.stage} v={task.stage} />
+          {!!task.description && <Line k={extra.description} v={task.description} />}
           <Line k={t.responsible} v={task.assignee} />
           <Line k={t.deadline} v={task.due} />
           <Line
@@ -927,7 +993,8 @@ function TasksScreen({
           <Pressable
             key={x.id}
             style={s.check}
-            disabled
+            disabled={task.status === 'review' || task.status === 'done' || !['foreman', 'subcontractor', 'pm', 'admin', 'director'].includes(role)}
+            onPress={() => void toggleChecklist(x.id, !x.done)}
           >
             <Text style={[s.checkBox, x.done && s.checkDone]}>
               {x.done ? "✓" : ""}
@@ -1001,6 +1068,7 @@ function TasksScreen({
         <Text style={s.label}>{c.priority}</Text>
         <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === createPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setCreatePriority(priority)}><Text style={priority === createPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
         <TextInput value={createDeadline} onChangeText={setCreateDeadline} placeholder={c.deadlineHint} autoCapitalize="none" style={s.input} />
+        <TextInput value={createChecklist} onChangeText={setCreateChecklist} placeholder={extra.checklist} multiline style={s.input} />
         <Pressable disabled={creating} style={s.primary} onPress={() => void submitTask()}><Text style={s.primaryText}>{creating ? c.loading : c.create}</Text></Pressable>
         <Pressable disabled={creating} style={s.outline} onPress={() => setShowCreate(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
       </View>}

@@ -29,6 +29,17 @@ afterAll(async () => {
 });
 
 describe('Task checklist and closure', () => {
+  it('edits planning fields and clears a deadline', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const taskRes = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id)
+      .send({ title: 'Исходная задача', plannedEnd: '2026-08-20' });
+    const assignee = await prisma.user.create({ data: { companyId: company.id, email: 'worker@example.com', passwordHash: 'hash', fullName: 'Рабочий' } });
+    const updated = await request(app).patch(`/api/tasks/${taskRes.body.id}`).set('x-company-id', company.id)
+      .send({ title: 'Обновленная задача', description: 'Проверить по чертежу', priority: 'high', assigneeId: assignee.id, plannedEnd: null });
+    expect(updated.status).toBe(200);
+    expect(updated.body).toMatchObject({ title: 'Обновленная задача', description: 'Проверить по чертежу', priority: 'high', assigneeId: assignee.id, plannedEnd: null });
+  });
+
   it('adds and toggles checklist items', async () => {
     const { company, sectionId } = await seedCompanyWithSection();
     const taskRes = await request(app)
