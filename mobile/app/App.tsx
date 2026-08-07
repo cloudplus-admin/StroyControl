@@ -148,6 +148,8 @@ function GeoPoint({ lang, latitude, longitude }: { lang: Lang; latitude?: number
 }
 
 type QuickAction = "photo" | "violation" | "qr" | "voice";
+type PlanningUser = { id: string; fullName: string };
+type PlanningSection = { id: string; name: string; stage: string };
 const copy = uiCopy;
 
 function PhotoViewer({ uri, headers, compact = false }: { uri: string; headers?: Record<string, string>; compact?: boolean }) {
@@ -739,15 +741,76 @@ function TasksScreen({
   const [reviewNote, setReviewNote] = useState("");
   const [draftPhotos, setDraftPhotos] = useState<string[]>([]);
   const [assigningReviewer, setAssigningReviewer] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createProjectId, setCreateProjectId] = useState("");
+  const [createSectionId, setCreateSectionId] = useState("");
+  const [createAssigneeId, setCreateAssigneeId] = useState("");
+  const [createPriority, setCreatePriority] = useState<'low' | 'normal' | 'high'>('normal');
+  const [createDeadline, setCreateDeadline] = useState("");
+  const [planningUsers, setPlanningUsers] = useState<PlanningUser[]>([]);
+  const [planningSections, setPlanningSections] = useState<PlanningSection[]>([]);
+  const canCreate = ['admin', 'director', 'pm'].includes(role);
   const allowed =
     role === "subcontractor" ? data.tasks.slice(0, 1) : data.tasks;
   const items = allowed.filter((x) => (filter === "all" || x.status === filter) && `${x.title} ${x.stage} ${x.assignee}`.toLowerCase().includes(query.trim().toLowerCase()));
   const task = data.tasks.find((x) => x.id === selected);
   const c = lang === "uz"
-    ? { assignError: "Texnik nazoratchini tayinlab bo'lmadi", serverError: "Server xatosi", search: "Vazifa, bosqich yoki ijrochi bo'yicha qidirish", empty: "Filtr bo'yicha vazifalar yo'q" }
+    ? { assignError: "Texnik nazoratchini tayinlab bo'lmadi", serverError: "Server xatosi", search: "Vazifa, bosqich yoki ijrochi bo'yicha qidirish", empty: "Filtr bo'yicha vazifalar yo'q", newTask: "Vazifa qo'yish", title: "Vazifa nomi", chooseObject: "Obyektni tanlang", chooseSection: "Ish bo'limini tanlang", chooseAssignee: "Ijrochini tanlang", noAssignee: "Tayinlanmagan", deadlineHint: "Muddat: YYYY-MM-DD", create: "Vazifa yaratish", cancel: "Bekor qilish", created: "Vazifa yaratildi", createError: "Vazifani yaratib bo'lmadi", required: "Nom, obyekt va bo'limni to'ldiring", loading: "Ma'lumotlar yuklanmoqda...", priority: "Ustuvorlik" }
     : lang === "en"
-      ? { assignError: "Could not assign inspector", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter" }
-      : { assignError: "Не удалось назначить технадзор", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет" };
+      ? { assignError: "Could not assign inspector", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter", newTask: "Create task", title: "Task title", chooseObject: "Choose an object", chooseSection: "Choose a work section", chooseAssignee: "Choose an assignee", noAssignee: "Unassigned", deadlineHint: "Deadline: YYYY-MM-DD", create: "Create task", cancel: "Cancel", created: "Task created", createError: "Could not create task", required: "Enter a title, object and section", loading: "Loading data...", priority: "Priority" }
+      : { assignError: "Не удалось назначить технадзор", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет", newTask: "Поставить задачу", title: "Название задачи", chooseObject: "Выберите объект", chooseSection: "Выберите раздел работ", chooseAssignee: "Выберите исполнителя", noAssignee: "Не назначен", deadlineHint: "Срок: ГГГГ-ММ-ДД", create: "Создать задачу", cancel: "Отмена", created: "Задача создана", createError: "Не удалось создать задачу", required: "Заполните название, объект и раздел", loading: "Загружаем данные...", priority: "Приоритет" };
+
+  const loadPlanning = async (project: string) => {
+    if (!api || !project) return;
+    try {
+      const [objectResponse, usersResponse] = await Promise.all([
+        api.request(`/api/objects/${encodeURIComponent(project)}`),
+        api.request('/api/planning/users'),
+      ]);
+      if (!objectResponse.ok || !usersResponse.ok) throw new Error(`HTTP ${objectResponse.status}/${usersResponse.status}`);
+      const object = await objectResponse.json() as { stages: { name: string; sections: { id: string; name: string }[] }[] };
+      const sections = object.stages.flatMap((stage) => stage.sections.map((section) => ({ ...section, stage: stage.name })));
+      setPlanningSections(sections);
+      setCreateSectionId(sections[0]?.id ?? '');
+      setPlanningUsers((await usersResponse.json() as PlanningUser[]));
+    } catch (error) {
+      Alert.alert(c.createError, error instanceof Error ? error.message : c.serverError);
+    }
+  };
+
+  const openCreate = () => {
+    const firstProject = data.projects[0]?.id ?? '';
+    setCreateProjectId(firstProject);
+    setShowCreate(true);
+    void loadPlanning(firstProject);
+  };
+
+  const submitTask = async () => {
+    if (!api || creating) return;
+    if (!createTitle.trim() || !createProjectId || !createSectionId) return Alert.alert(c.createError, c.required);
+    setCreating(true);
+    try {
+      const response = await api.request(`/api/objects/sections/${encodeURIComponent(createSectionId)}/tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: createTitle.trim(),
+          assigneeId: createAssigneeId || null,
+          priority: createPriority,
+          plannedEnd: createDeadline.trim() || undefined,
+          dependsOn: [],
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      updateData(await refreshServerData(data, api, lang));
+      setCreateTitle(''); setCreateAssigneeId(''); setCreateDeadline(''); setCreatePriority('normal'); setShowCreate(false);
+      Alert.alert(c.created);
+    } catch (error) {
+      Alert.alert(c.createError, error instanceof Error ? error.message : c.serverError);
+    } finally { setCreating(false); }
+  };
   const assignReviewer = async (reviewerId: string) => {
     if (!task || !api || assigningReviewer) return;
     setAssigningReviewer(true);
@@ -923,6 +986,24 @@ function TasksScreen({
     <View>
       <Text style={s.eyebrow}>{t.stage02}</Text>
       <Text style={s.h1}>{t.myTasks}</Text>
+      {canCreate && !showCreate && <Pressable style={s.primary} onPress={openCreate}><Text style={s.primaryText}>+ {c.newTask}</Text></Pressable>}
+      {canCreate && showCreate && <View style={s.card}>
+        <Text style={s.cardTitle}>{c.newTask}</Text>
+        <TextInput value={createTitle} onChangeText={setCreateTitle} placeholder={c.title} style={s.input} />
+        <Text style={s.label}>{c.chooseObject}</Text>
+        {data.projects.map((project) => <Pressable key={project.id} style={project.id === createProjectId ? s.primary : s.outlineInline} onPress={() => { setCreateProjectId(project.id); setCreateSectionId(''); void loadPlanning(project.id); }}><Text style={project.id === createProjectId ? s.primaryText : s.outlineText}>{project.name}</Text></Pressable>)}
+        <Text style={s.label}>{c.chooseSection}</Text>
+        {planningSections.length === 0 && <Text style={s.muted}>{c.loading}</Text>}
+        {planningSections.map((section) => <Pressable key={section.id} style={section.id === createSectionId ? s.primary : s.outlineInline} onPress={() => setCreateSectionId(section.id)}><Text style={section.id === createSectionId ? s.primaryText : s.outlineText}>{section.stage} - {section.name}</Text></Pressable>)}
+        <Text style={s.label}>{c.chooseAssignee}</Text>
+        <Pressable style={!createAssigneeId ? s.primary : s.outlineInline} onPress={() => setCreateAssigneeId('')}><Text style={!createAssigneeId ? s.primaryText : s.outlineText}>{c.noAssignee}</Text></Pressable>
+        {planningUsers.map((user) => <Pressable key={user.id} style={user.id === createAssigneeId ? s.primary : s.outlineInline} onPress={() => setCreateAssigneeId(user.id)}><Text style={user.id === createAssigneeId ? s.primaryText : s.outlineText}>{user.fullName}</Text></Pressable>)}
+        <Text style={s.label}>{c.priority}</Text>
+        <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === createPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setCreatePriority(priority)}><Text style={priority === createPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
+        <TextInput value={createDeadline} onChangeText={setCreateDeadline} placeholder={c.deadlineHint} autoCapitalize="none" style={s.input} />
+        <Pressable disabled={creating} style={s.primary} onPress={() => void submitTask()}><Text style={s.primaryText}>{creating ? c.loading : c.create}</Text></Pressable>
+        <Pressable disabled={creating} style={s.outline} onPress={() => setShowCreate(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
+      </View>}
       <TextInput value={query} onChangeText={setQuery} placeholder={c.search} style={s.search} />
       <ScrollView
         horizontal
