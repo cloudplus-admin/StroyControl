@@ -1,12 +1,57 @@
-import { useTranslation } from 'react-i18next';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { api, UserSession } from './api';
+import './styles.css';
+
+type Lang = 'ru' | 'uz';
+type ObjectSummary = { id: string; name: string; address?: string; progress: number; taskCount: number; riskLevel: string };
+type ObjectDetail = { id: string; name: string; stages: { id: string; name: string; sections: { id: string; name: string; tasks: { id: string; title: string; status: string; priority: string; plannedEnd?: string }[] }[] }[] };
+type Role = { id: number; code: string; name: string };
+type User = { id: string; fullName: string; email: string; roles: { objectId: string | null; role: { code: string; name: string } }[] };
+
+const copy = {
+  ru: { loginError: 'Ошибка входа', eyebrowLogin: 'УПРАВЛЕНИЕ СТРОИТЕЛЬСТВОМ', loginTitle: 'Вход в рабочий контур', loginBody: 'Объекты, команда и задачи одной компании.', password: 'Пароль', signingIn: 'Входим...', signIn: 'Войти', objects: 'Объекты и задачи', team: 'Пользователи и роли', logout: 'Выйти', production: 'ПРОИЗВОДСТВЕННЫЙ КОНТУР', serverOnline: 'Сервер подключен', overdue: 'Есть просрочка', onTrack: 'В графике', noAddress: 'Адрес не указан', tasks: 'задач', selected: 'ВЫБРАННЫЙ ОБЪЕКТ', sections: 'разделов', noDeadline: 'Без срока', noTasks: 'Задач пока нет', newTask: 'Новая задача', section: 'Раздел', title: 'Название', assignee: 'Исполнитель', unassigned: 'Не назначен', priority: 'Приоритет', low: 'Низкий', normal: 'Обычный', high: 'Высокий', deadline: 'Срок', createTask: 'Создать задачу', access: 'ДОСТУП И ОТВЕТСТВЕННОСТЬ', addEmployee: 'Добавить сотрудника', fullName: 'ФИО', temporaryPassword: 'Временный пароль', role: 'Роль', object: 'Объект', wholeCompany: 'Вся компания', createUser: 'Создать пользователя' },
+  uz: { loginError: 'Kirish xatosi', eyebrowLogin: 'QURILISHNI BOSHQARISH', loginTitle: 'Ish tizimiga kirish', loginBody: 'Bir kompaniyaning obyektlari, jamoasi va vazifalari.', password: 'Parol', signingIn: 'Kirilmoqda...', signIn: 'Kirish', objects: 'Obyektlar va vazifalar', team: 'Foydalanuvchilar va rollar', logout: 'Chiqish', production: 'ISHLAB CHIQARISH TIZIMI', serverOnline: 'Server ulangan', overdue: 'Kechikish bor', onTrack: 'Reja bo‘yicha', noAddress: 'Manzil ko‘rsatilmagan', tasks: 'vazifa', selected: 'TANLANGAN OBYEKT', sections: 'bo‘lim', noDeadline: 'Muddatsiz', noTasks: 'Hozircha vazifalar yo‘q', newTask: 'Yangi vazifa', section: 'Bo‘lim', title: 'Nomi', assignee: 'Ijrochi', unassigned: 'Tayinlanmagan', priority: 'Ustuvorlik', low: 'Past', normal: 'Oddiy', high: 'Yuqori', deadline: 'Muddat', createTask: 'Vazifa yaratish', access: 'KIRISH VA MAS’ULIYAT', addEmployee: 'Xodim qo‘shish', fullName: 'F.I.Sh.', temporaryPassword: 'Vaqtinchalik parol', role: 'Rol', object: 'Obyekt', wholeCompany: 'Butun kompaniya', createUser: 'Foydalanuvchi yaratish' },
+} as const;
+type Copy = typeof copy.ru | typeof copy.uz;
 
 export default function App() {
-  const { t } = useTranslation();
+  const [session, setSession] = useState<UserSession | null>(api.getSession());
+  const [lang, setLangState] = useState<Lang>(() => localStorage.getItem('stroycontrol:web:lang') === 'uz' ? 'uz' : 'ru');
+  const setLang = (value: Lang) => { localStorage.setItem('stroycontrol:web:lang', value); setLangState(value); };
+  if (!session) return <Login lang={lang} setLang={setLang} onLogin={setSession} />;
+  return <Workspace lang={lang} setLang={setLang} session={session} onLogout={async () => { await api.logout(); setSession(null); }} />;
+}
 
-  return (
-    <main>
-      <h1>{t('app.title')}</h1>
-      <p>{t('app.subtitle')}</p>
-    </main>
-  );
+function LanguageSwitch({ lang, setLang }: { lang: Lang; setLang: (lang: Lang) => void }) {
+  return <div className="language-switch"><button className={lang === 'ru' ? 'active' : ''} onClick={() => setLang('ru')}>RU</button><button className={lang === 'uz' ? 'active' : ''} onClick={() => setLang('uz')}>UZ</button></div>;
+}
+
+function Login({ lang, setLang, onLogin }: { lang: Lang; setLang: (lang: Lang) => void; onLogin: (session: UserSession) => void }) {
+  const c = copy[lang];
+  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { onLogin(await api.login(email, password)); } catch (e) { setError(e instanceof Error ? e.message : c.loginError); } finally { setBusy(false); } };
+  return <main className="login-page"><section className="login-card"><LanguageSwitch lang={lang} setLang={setLang} /><div className="brand">STROY<span>CONTROL</span></div><p className="eyebrow">{c.eyebrowLogin}</p><h1>{c.loginTitle}</h1><p className="muted">{c.loginBody}</p><form onSubmit={submit}><label>Email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label><label>{c.password}<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required /></label>{error && <p className="error">{error}</p>}<button disabled={busy}>{busy ? c.signingIn : c.signIn}</button></form></section></main>;
+}
+
+function Workspace({ lang, setLang, session, onLogout }: { lang: Lang; setLang: (lang: Lang) => void; session: UserSession; onLogout: () => Promise<void> }) {
+  const c = copy[lang]; const admin = session.user.roles.some((role) => role.code === 'admin'); const canPlan = session.user.roles.some((role) => ['admin', 'owner', 'pm'].includes(role.code)); const [tab, setTab] = useState<'objects' | 'team'>('objects');
+  return <div className="shell"><aside><div className="brand">STROY<span>CONTROL</span></div><LanguageSwitch lang={lang} setLang={setLang} /><nav><button className={tab === 'objects' ? 'active' : ''} onClick={() => setTab('objects')}>{c.objects}</button>{admin && <button className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}>{c.team}</button>}</nav><div className="profile"><strong>{session.user.fullName}</strong><small>{session.user.companyName}</small><button onClick={() => void onLogout()}>{c.logout}</button></div></aside><main className="workspace">{tab === 'objects' ? <Objects lang={lang} c={c} canPlan={canPlan} /> : <Team c={c} />}</main></div>;
+}
+
+function Objects({ lang, c, canPlan }: { lang: Lang; c: Copy; canPlan: boolean }) {
+  const [objects, setObjects] = useState<ObjectSummary[]>([]); const [people, setPeople] = useState<User[]>([]); const [selected, setSelected] = useState<ObjectDetail | null>(null); const [error, setError] = useState(''); const [title, setTitle] = useState(''); const [sectionId, setSectionId] = useState(''); const [assigneeId, setAssigneeId] = useState(''); const [priority, setPriority] = useState('normal'); const [plannedEnd, setPlannedEnd] = useState('');
+  const load = useCallback(async () => { try { setObjects(await api.json('/api/objects')); if (canPlan) setPeople(await api.json('/api/planning/users')); } catch (e) { setError(String(e)); } }, [canPlan]);
+  useEffect(() => { void load(); }, [load]);
+  const open = async (id: string) => { const value = await api.json<ObjectDetail>(`/api/objects/${id}`); setSelected(value); setSectionId(value.stages[0]?.sections[0]?.id ?? ''); };
+  const sections = useMemo(() => selected?.stages.flatMap((stage) => stage.sections.map((section) => ({ ...section, stage: stage.name }))) ?? [], [selected]);
+  const createTask = async (event: FormEvent) => { event.preventDefault(); if (!sectionId) return; await api.json(`/api/objects/sections/${sectionId}/tasks`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, assigneeId: assigneeId || null, priority, plannedEnd: plannedEnd || undefined, dependsOn: [] }) }); setTitle(''); setPlannedEnd(''); if (selected) await open(selected.id); await load(); };
+  return <><header><div><p className="eyebrow">{c.production}</p><h1>{c.objects}</h1></div><div className="status-dot">{c.serverOnline}</div></header>{error && <p className="error">{error}</p>}<section className="object-grid">{objects.map((object) => <button className={`object-card ${selected?.id === object.id ? 'selected' : ''}`} key={object.id} onClick={() => void open(object.id)}><span className={`risk ${object.riskLevel}`}>{object.riskLevel === 'overdue' ? c.overdue : c.onTrack}</span><h2>{object.name}</h2><p>{object.address || c.noAddress}</p><div className="progress"><i style={{ width: `${object.progress}%` }} /></div><div className="metrics"><strong>{object.progress}%</strong><span>{object.taskCount} {c.tasks}</span></div></button>)}</section>{selected && <section className="detail"><div className="detail-head"><div><p className="eyebrow">{c.selected}</p><h2>{selected.name}</h2></div><span>{sections.length} {c.sections}</span></div><div className="task-layout"><div>{sections.map((section) => <article className="section" key={section.id}><h3>{section.stage} / {section.name}</h3>{section.tasks.length ? section.tasks.map((task) => <div className="task" key={task.id}><div><strong>{task.title}</strong><small>{task.plannedEnd ? new Date(task.plannedEnd).toLocaleDateString(lang === 'uz' ? 'uz-UZ' : 'ru-RU') : c.noDeadline}</small></div><span className={`task-status ${task.status}`}>{task.status}</span></div>) : <p className="muted">{c.noTasks}</p>}</article>)}</div>{canPlan && <form className="panel" onSubmit={createTask}><h3>{c.newTask}</h3><label>{c.section}<select value={sectionId} onChange={(e) => setSectionId(e.target.value)}>{sections.map((section) => <option value={section.id} key={section.id}>{section.stage} / {section.name}</option>)}</select></label><label>{c.title}<input value={title} onChange={(e) => setTitle(e.target.value)} required /></label><label>{c.assignee}<select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}><option value="">{c.unassigned}</option>{people.map((person) => <option value={person.id} key={person.id}>{person.fullName}</option>)}</select></label><label>{c.priority}<select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="low">{c.low}</option><option value="normal">{c.normal}</option><option value="high">{c.high}</option></select></label><label>{c.deadline}<input type="date" value={plannedEnd} onChange={(e) => setPlannedEnd(e.target.value)} /></label><button>{c.createTask}</button></form>}</div></section>}</>;
+}
+
+function Team({ c }: { c: Copy }) {
+  const [users, setUsers] = useState<User[]>([]); const [roles, setRoles] = useState<Role[]>([]); const [objects, setObjects] = useState<ObjectSummary[]>([]); const [form, setForm] = useState({ fullName: '', email: '', password: '', roleCode: 'foreman', objectId: '' }); const [error, setError] = useState('');
+  const load = useCallback(async () => { const [u, r, o] = await Promise.all([api.json<User[]>('/api/admin/users'), api.json<Role[]>('/api/admin/roles'), api.json<ObjectSummary[]>('/api/objects')]); setUsers(u); setRoles(r); setObjects(o); }, []);
+  useEffect(() => { void load().catch((e) => setError(String(e))); }, [load]);
+  const create = async (event: FormEvent) => { event.preventDefault(); setError(''); try { await api.json('/api/admin/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...form, objectId: form.objectId || null }) }); setForm({ ...form, fullName: '', email: '', password: '' }); await load(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } };
+  return <><header><div><p className="eyebrow">{c.access}</p><h1>{c.team}</h1></div></header>{error && <p className="error">{error}</p>}<div className="team-layout"><section className="user-list">{users.map((user) => <article key={user.id}><div className="avatar">{user.fullName.split(' ').map((x) => x[0]).join('').slice(0, 2)}</div><div><strong>{user.fullName}</strong><small>{user.email}</small></div><span>{user.roles.map((role) => role.role.name).join(', ')}</span></article>)}</section><form className="panel" onSubmit={create}><h3>{c.addEmployee}</h3><label>{c.fullName}<input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} required /></label><label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label><label>{c.temporaryPassword}<input type="password" minLength={10} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required /></label><label>{c.role}<select value={form.roleCode} onChange={(e) => setForm({ ...form, roleCode: e.target.value })}>{roles.map((role) => <option value={role.code} key={role.code}>{role.name}</option>)}</select></label><label>{c.object}<select value={form.objectId} onChange={(e) => setForm({ ...form, objectId: e.target.value })}><option value="">{c.wholeCompany}</option>{objects.map((object) => <option value={object.id} key={object.id}>{object.name}</option>)}</select></label><button>{c.createUser}</button></form></div></>;
 }

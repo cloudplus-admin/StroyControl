@@ -32,3 +32,14 @@ export const closeTaskSchema = z.object({
   geoLat: z.number().min(-90).max(90),
   geoLng: z.number().min(-180).max(180),
 });
+
+export const reviewTaskSchema = z.object({
+  decision: z.enum(['accepted', 'rejected']),
+  note: z.string().trim().max(1000).default(''),
+}).superRefine((value, ctx) => {
+  if (value.decision === 'rejected' && !value.note) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['note'], message: 'Rejection note is required' });
+});
+
+export const assignReviewerSchema = z.object({
+  reviewerId: z.string().uuid(),
+});

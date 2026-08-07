@@ -65,7 +65,7 @@ describe('Task checklist and closure', () => {
     expect(closeRes.status).toBe(400);
   });
 
-  it('closes a task with photo and geotag, marking it done', async () => {
+  it('submits a task with photo and geotag for review', async () => {
     const { company, sectionId } = await seedCompanyWithSection();
     const taskRes = await request(app)
       .post(`/api/objects/sections/${sectionId}/tasks`)
@@ -75,11 +75,50 @@ describe('Task checklist and closure', () => {
     const closeRes = await request(app)
       .post(`/api/tasks/${taskRes.body.id}/close`)
       .set('x-company-id', company.id)
+      .set('idempotency-key', 'close-task-from-site-1')
       .send({ photoUrl: 'https://example.com/photo.jpg', geoLat: 41.3, geoLng: 69.2 });
 
     expect(closeRes.status).toBe(200);
-    expect(closeRes.body.status).toBe('done');
+    expect(closeRes.body.status).toBe('review');
     expect(closeRes.body.closurePhotoUrl).toBe('https://example.com/photo.jpg');
+  });
+
+  it('replays the same offline close operation without duplicate side effects', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const taskRes = await request(app)
+      .post(`/api/objects/sections/${sectionId}/tasks`)
+      .set('x-company-id', company.id)
+      .send({ title: 'Офлайн-задача' });
+    const payload = { photoUrl: 'https://example.com/offline.jpg', geoLat: 41.31, geoLng: 69.21 };
+    const sendClose = () => request(app)
+      .post(`/api/tasks/${taskRes.body.id}/close`)
+      .set('x-company-id', company.id)
+      .set('idempotency-key', 'device-operation-123')
+      .send(payload);
+
+    const first = await sendClose();
+    const replay = await sendClose();
+    expect(first.status).toBe(200);
+    expect(first.headers['idempotency-replayed']).toBe('false');
+    expect(replay.status).toBe(200);
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(replay.body.id).toBe(first.body.id);
+    expect(await prisma.idempotencyRecord.count()).toBe(1);
+    expect(await prisma.feedEvent.count({ where: { body: { contains: 'Офлайн-задача' } } })).toBe(1);
+  });
+
+  it('rejects reuse of an idempotency key with different data', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const taskRes = await request(app)
+      .post(`/api/objects/sections/${sectionId}/tasks`)
+      .set('x-company-id', company.id)
+      .send({ title: 'Конфликт ключа' });
+    const endpoint = `/api/tasks/${taskRes.body.id}/close`;
+    await request(app).post(endpoint).set('x-company-id', company.id).set('idempotency-key', 'same-key')
+      .send({ photoUrl: 'https://example.com/a.jpg', geoLat: 41.3, geoLng: 69.2 });
+    const conflict = await request(app).post(endpoint).set('x-company-id', company.id).set('idempotency-key', 'same-key')
+      .send({ photoUrl: 'https://example.com/b.jpg', geoLat: 41.4, geoLng: 69.3 });
+    expect(conflict.status).toBe(409);
   });
 });
 

@@ -1,11 +1,12 @@
 import { prisma } from '../../db/prisma';
-import { createSystemEvent } from '../feed/service';
+import { createHash } from 'crypto';
+import { notifyObjectRoles, notifyUsers } from '../notifications/service';
 
 function scopedTaskWhere(companyId: string, taskId: string) {
   return { id: taskId, workSection: { stage: { object: { companyId } } } };
 }
 
-async function getTaskObjectId(taskId: string): Promise<string | null> {
+export async function getTaskObjectId(taskId: string): Promise<string | null> {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: { workSection: { select: { stage: { select: { objectId: true } } } } },
@@ -49,27 +50,154 @@ export async function closeTask(
   companyId: string,
   taskId: string,
   input: { photoUrl: string; geoLat: number; geoLng: number },
+  options: { idempotencyKey: string; actorId?: string; roles?: { code: string; objectId: string | null }[] },
 ) {
-  const task = await prisma.task.findFirst({ where: scopedTaskWhere(companyId, taskId) });
-  if (!task) return null;
-  const updated = await prisma.task.update({
-    where: { id: taskId },
-    data: {
-      status: 'done',
-      actualEnd: new Date(),
-      closedAt: new Date(),
-      closurePhotoUrl: input.photoUrl,
-      closureGeoLat: input.geoLat,
-      closureGeoLng: input.geoLng,
-    },
+  const requestHash = createHash('sha256').update(JSON.stringify({ taskId, ...input })).digest('hex');
+  const existing = await prisma.idempotencyRecord.findUnique({
+    where: { companyId_key: { companyId, key: options.idempotencyKey } },
   });
-
-  const objectId = await getTaskObjectId(taskId);
-  if (objectId) {
-    await createSystemEvent(objectId, 'status_change', `Задача «${task.title}» закрыта с площадки (фото + геометка)`);
+  if (existing) {
+    if (existing.operation !== 'task.close' || existing.requestHash !== requestHash) {
+      return { kind: 'conflict' as const };
+    }
+    return { kind: 'ok' as const, task: existing.responseBody, replayed: true };
   }
 
-  return updated;
+  const task = await prisma.task.findFirst({
+    where: scopedTaskWhere(companyId, taskId),
+    select: { id: true, title: true, reviewerId: true, workSection: { select: { stage: { select: { objectId: true } } } } },
+  });
+  if (!task) return null;
+  if (options.actorId) {
+    let uploadId: string;
+    try {
+      const pathname = new URL(input.photoUrl).pathname;
+      const match = pathname.match(/^\/api\/uploads\/([0-9a-f-]+)$/i);
+      if (!match) return { kind: 'invalid_upload' as const };
+      uploadId = match[1];
+    } catch {
+      return { kind: 'invalid_upload' as const };
+    }
+    const upload = await prisma.fileUpload.findFirst({ where: { id: uploadId, companyId, taskId } });
+    if (!upload) return { kind: 'invalid_upload' as const };
+  }
+  if (options.roles) {
+    const objectId = task.workSection.stage.objectId;
+    const allowed = options.roles.some((role) => ['foreman', 'subcontractor', 'pm', 'admin', 'owner'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
+    if (!allowed) return { kind: 'forbidden' as const };
+  }
+
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.idempotencyRecord.create({
+        data: { companyId, key: options.idempotencyKey, operation: 'task.close', requestHash },
+      });
+      const closed = await tx.task.update({
+        where: { id: taskId },
+        data: {
+          status: 'review',
+          submittedAt: new Date(),
+          closurePhotoUrl: input.photoUrl,
+          closureGeoLat: input.geoLat,
+          closureGeoLng: input.geoLng,
+        },
+      });
+      await tx.feedEvent.create({
+        data: {
+          objectId: task.workSection.stage.objectId,
+          kind: 'status_change',
+          body: `Задача «${task.title}» отправлена на проверку (фото + геометка)`,
+        },
+      });
+      if (task.reviewerId) await notifyUsers(tx, { companyId, userIds: [task.reviewerId], objectId: task.workSection.stage.objectId, kind: 'task_review', title: 'Задача ожидает проверки', body: task.title, entityType: 'task', entityId: taskId });
+      else await notifyObjectRoles(tx, { companyId, objectId: task.workSection.stage.objectId, roleCodes: ['inspector'], kind: 'task_review', title: 'Задача ожидает проверки', body: task.title, entityType: 'task', entityId: taskId });
+      if (options.actorId) {
+        await tx.auditLog.create({
+          data: {
+            companyId,
+            actorId: options.actorId,
+            action: 'task.close',
+            entityType: 'task',
+            entityId: taskId,
+            payload: { photoUrl: input.photoUrl, geoLat: input.geoLat, geoLng: input.geoLng },
+          },
+        });
+      }
+      await tx.idempotencyRecord.update({
+        where: { companyId_key: { companyId, key: options.idempotencyKey } },
+        data: { responseBody: closed, statusCode: 200 },
+      });
+      return closed;
+    });
+    return { kind: 'ok' as const, task: updated, replayed: false };
+  } catch (error) {
+    const raced = await prisma.idempotencyRecord.findUnique({
+      where: { companyId_key: { companyId, key: options.idempotencyKey } },
+    });
+    if (raced?.operation === 'task.close' && raced.requestHash === requestHash && raced.responseBody) {
+      return { kind: 'ok' as const, task: raced.responseBody, replayed: true };
+    }
+    throw error;
+  }
+}
+
+export async function reviewTask(
+  companyId: string,
+  taskId: string,
+  input: { decision: 'accepted' | 'rejected'; note: string },
+  options: { idempotencyKey: string; actorId: string; roles: { code: string; objectId: string | null }[] },
+) {
+  const requestHash = createHash('sha256').update(JSON.stringify({ taskId, ...input })).digest('hex');
+  const existing = await prisma.idempotencyRecord.findUnique({ where: { companyId_key: { companyId, key: options.idempotencyKey } } });
+  if (existing) {
+    if (existing.operation !== 'task.review' || existing.requestHash !== requestHash) return { kind: 'conflict' as const };
+    return { kind: 'ok' as const, task: existing.responseBody, replayed: true };
+  }
+  const task = await prisma.task.findFirst({ where: scopedTaskWhere(companyId, taskId), select: { id: true, title: true, status: true, reviewerId: true, assigneeId: true, workSection: { select: { stage: { select: { objectId: true } } } } } });
+  if (!task) return null;
+  const objectId = task.workSection.stage.objectId;
+  const allowed = options.roles.some((role) => ['inspector', 'admin', 'owner', 'pm'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
+  if (!allowed) return { kind: 'forbidden' as const };
+  const isInspectorOnly = options.roles.some((role) => role.code === 'inspector') && !options.roles.some((role) => ['admin', 'owner', 'pm'].includes(role.code));
+  if (isInspectorOnly && task.reviewerId !== options.actorId) return { kind: 'forbidden' as const };
+  if (task.status !== 'review') return { kind: 'invalid_state' as const };
+  const now = new Date();
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.idempotencyRecord.create({ data: { companyId, key: options.idempotencyKey, operation: 'task.review', requestHash } });
+    const reviewed = await tx.task.update({ where: { id: taskId }, data: {
+      status: input.decision === 'accepted' ? 'done' : 'in_progress', reviewedAt: now, reviewedById: options.actorId,
+      reviewNote: input.note || (input.decision === 'accepted' ? 'Принято технадзором' : null),
+      ...(input.decision === 'accepted' ? { actualEnd: now, closedAt: now } : { actualEnd: null, closedAt: null }),
+    } });
+    await tx.feedEvent.create({ data: { objectId, authorId: options.actorId, kind: 'acceptance', body: input.decision === 'accepted' ? `Задача «${task.title}» принята технадзором` : `Задача «${task.title}» отклонена: ${input.note}` } });
+    if (task.assigneeId) await notifyUsers(tx, { companyId, userIds: [task.assigneeId], objectId, kind: 'task_decision', title: input.decision === 'accepted' ? 'Работа принята' : 'Работа отклонена', body: input.decision === 'accepted' ? task.title : `${task.title}: ${input.note}`, entityType: 'task', entityId: taskId });
+    await tx.auditLog.create({ data: { companyId, actorId: options.actorId, action: input.decision === 'accepted' ? 'task.accept' : 'task.reject', entityType: 'task', entityId: taskId, payload: input } });
+    await tx.idempotencyRecord.update({ where: { companyId_key: { companyId, key: options.idempotencyKey } }, data: { responseBody: reviewed, statusCode: 200 } });
+    return reviewed;
+  });
+  return { kind: 'ok' as const, task: updated, replayed: false };
+}
+
+export async function assignTaskReviewer(
+  companyId: string,
+  taskId: string,
+  reviewerId: string,
+  options: { userId: string; roles: { code: string; objectId: string | null }[] },
+) {
+  const task = await prisma.task.findFirst({ where: scopedTaskWhere(companyId, taskId), select: { id: true, title: true, workSection: { select: { stage: { select: { objectId: true } } } } } });
+  if (!task) return null;
+  const objectId = task.workSection.stage.objectId;
+  const allowed = options.roles.some((role) => ['admin', 'owner', 'pm'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
+  if (!allowed) return { kind: 'forbidden' as const };
+  const reviewer = await prisma.user.findFirst({ where: { id: reviewerId, companyId, roles: { some: { role: { code: 'inspector' }, OR: [{ objectId: null }, { objectId }] } } }, select: { id: true, fullName: true } });
+  if (!reviewer) return { kind: 'invalid_reviewer' as const };
+  const updated = await prisma.$transaction(async (tx) => {
+    const assigned = await tx.task.update({ where: { id: taskId }, data: { reviewerId }, include: { reviewer: { select: { id: true, fullName: true } } } });
+    await tx.auditLog.create({ data: { companyId, actorId: options.userId, action: 'task.reviewer.assign', entityType: 'task', entityId: taskId, payload: { reviewerId, reviewerName: reviewer.fullName } } });
+    await tx.feedEvent.create({ data: { objectId, authorId: options.userId, kind: 'assignment', body: `Задача «${task.title}» назначена технадзору ${reviewer.fullName}` } });
+    return assigned;
+  });
+  return { kind: 'ok' as const, task: updated };
 }
 
 /**

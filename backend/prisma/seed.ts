@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { OBJECT_TEMPLATES } from '../src/modules/objects/templates';
+import { hashPassword } from '../src/auth/crypto';
 
 const prisma = new PrismaClient();
 
@@ -32,6 +33,30 @@ async function main() {
     update: {},
     create: { id: '00000000-0000-0000-0000-000000000001', name: 'CloudPlus Demo' },
   });
+
+  const adminRole = await prisma.role.findUniqueOrThrow({ where: { code: 'admin' } });
+  const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase() ?? 'admin@stroycontrol.local';
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (adminPassword) {
+    const admin = await prisma.user.upsert({
+      where: { email: adminEmail },
+      update: { passwordHash: await hashPassword(adminPassword) },
+      create: {
+        companyId: company.id,
+        email: adminEmail,
+        fullName: 'Администратор StroyControl',
+        passwordHash: await hashPassword(adminPassword),
+      },
+    });
+    const assignment = await prisma.userRole.findFirst({
+      where: { userId: admin.id, roleId: adminRole.id, objectId: null },
+    });
+    if (!assignment) {
+      await prisma.userRole.create({ data: { userId: admin.id, roleId: adminRole.id } });
+    }
+  } else {
+    console.warn('SEED_ADMIN_PASSWORD is not set; admin user was not created.');
+  }
 
   const existing = await prisma.object.findFirst({ where: { companyId: company.id, name: { contains: 'Тошкент Сити' } } });
   if (existing) {

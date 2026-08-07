@@ -56,13 +56,15 @@ export async function listObjects(companyId: string) {
 
 export async function createObject(
   companyId: string,
-  input: { name: string; address?: string; templateCode?: ObjectTemplateCode },
+  input: { name: string; nameUz?: string; address?: string; addressUz?: string; templateCode?: ObjectTemplateCode },
 ) {
   return prisma.object.create({
     data: {
       companyId,
       name: input.name,
+      nameUz: input.nameUz,
       address: input.address,
+      addressUz: input.addressUz,
       templateCode: input.templateCode,
       stages: input.templateCode
         ? {
@@ -103,29 +105,29 @@ export async function getObject(companyId: string, objectId: string) {
 export async function updateObject(
   companyId: string,
   objectId: string,
-  input: { name?: string; address?: string; status?: string },
+  input: { name?: string; nameUz?: string; address?: string; addressUz?: string; status?: string },
 ) {
   const existing = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!existing) return null;
   return prisma.object.update({ where: { id: objectId }, data: input });
 }
 
-export async function addStage(companyId: string, objectId: string, input: { name: string; sortOrder: number }) {
+export async function addStage(companyId: string, objectId: string, input: { name: string; nameUz?: string; sortOrder: number }) {
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!object) return null;
-  return prisma.stage.create({ data: { objectId, name: input.name, sortOrder: input.sortOrder } });
+  return prisma.stage.create({ data: { objectId, name: input.name, nameUz: input.nameUz, sortOrder: input.sortOrder } });
 }
 
 export async function addSection(
   companyId: string,
   stageId: string,
-  input: { name: string; sortOrder: number },
+  input: { name: string; nameUz?: string; sortOrder: number },
 ) {
   const stage = await prisma.stage.findFirst({
     where: { id: stageId, object: { companyId } },
   });
   if (!stage) return null;
-  return prisma.workSection.create({ data: { stageId, name: input.name, sortOrder: input.sortOrder } });
+  return prisma.workSection.create({ data: { stageId, name: input.name, nameUz: input.nameUz, sortOrder: input.sortOrder } });
 }
 
 export async function addTask(
@@ -133,7 +135,10 @@ export async function addTask(
   workSectionId: string,
   input: {
     title: string;
+    titleUz?: string;
     description?: string;
+    descriptionUz?: string;
+    assigneeId?: string | null;
     parentTaskId?: string;
     priority: string;
     plannedStart?: Date;
@@ -148,6 +153,10 @@ export async function addTask(
     where: { id: workSectionId, stage: { object: { companyId } } },
   });
   if (!section) return null;
+  if (input.assigneeId) {
+    const assignee = await prisma.user.findFirst({ where: { id: input.assigneeId, companyId } });
+    if (!assignee) return null;
+  }
   return prisma.task.create({ data: { workSectionId, ...input } });
 }
 

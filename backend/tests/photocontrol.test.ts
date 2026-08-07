@@ -66,6 +66,22 @@ describe('Photo reports', () => {
     expect(res.status).toBe(201);
   });
 
+  it('stores a multi-angle mobile report and inspector decision', async () => {
+    const { company, object, user } = await seedCompanyWithObjectAndUser();
+    const createRes = await request(app)
+      .post(`/api/objects/${object.id}/photo-reports`)
+      .set('x-company-id', company.id)
+      .send({ authorId: user.id, fileUrl: 'https://example.com/front.jpg', shootingPoint: 'axis-a', kind: 'hidden_works', status: 'review', requiredAngles: ['front', 'side'], photos: [{ angle: 'front', uri: 'https://example.com/front.jpg' }, { angle: 'side', uri: 'https://example.com/side.jpg' }] });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body).toMatchObject({ status: 'review', requiredAngles: ['front', 'side'] });
+    const reviewRes = await request(app)
+      .post(`/api/photo-reports/${createRes.body.id}/review`)
+      .set('x-company-id', company.id)
+      .send({ decision: 'accepted', note: 'ok', inspectorSignature: 'Inspector' });
+    expect(reviewRes.status).toBe(200);
+    expect(reviewRes.body).toMatchObject({ status: 'accepted', inspectorNote: 'ok', inspectorSignature: 'Inspector' });
+  });
+
   it('builds a timeline for a shooting point sorted by date', async () => {
     const { company, object, user } = await seedCompanyWithObjectAndUser();
     await request(app)

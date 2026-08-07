@@ -16,6 +16,11 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
   users     User[]
   objects   Object[]
+  auditLogs AuditLog[]
+  idempotencyRecords IdempotencyRecord[]
+  uploads   FileUpload[]
+  documents ProjectDocument[]
+  workActs  WorkAct[]
 
   @@map("companies")
 }
@@ -24,6 +29,7 @@ model Role {
   id   Int    @id @default(autoincrement())
   code String @unique
   name String
+  userRoles UserRole[]
 
   @@map("roles")
 }
@@ -39,10 +45,19 @@ model User {
   locale       String   @default("ru")
   createdAt    DateTime @default(now()) @map("created_at")
   assignedTasks        Task[]
+  reviewAssignments    Task[] @relation("TaskReviewer")
   authoredPhotoReports PhotoReport[]
   reportedDefects      Defect[]
   feedEvents           FeedEvent[]
   feedReactions        FeedReaction[]
+  roles                UserRole[]
+  sessions             Session[]
+  auditLogs            AuditLog[]
+  createdDocuments     ProjectDocument[] @relation("DocumentCreator")
+  documentDecisions   DocumentApproval[]
+  createdWorkActs      WorkAct[] @relation("ActCreator")
+  signedWorkActs       WorkAct[] @relation("ActSigner")
+  notifications        Notification[]
 
   @@map("users")
 }
@@ -52,7 +67,9 @@ model Object {
   companyId    String   @map("company_id")
   company      Company  @relation(fields: [companyId], references: [id])
   name         String
+  nameUz       String?  @map("name_uz")
   address      String?
+  addressUz    String?  @map("address_uz")
   templateCode String?  @map("template_code")
   status       String   @default("active")
   createdAt    DateTime @default(now()) @map("created_at")
@@ -60,8 +77,93 @@ model Object {
   photoReports PhotoReport[]
   defects      Defect[]
   feedEvents   FeedEvent[]
+  userRoles    UserRole[]
+  documents    ProjectDocument[]
+  workActs     WorkAct[]
 
   @@map("objects")
+}
+
+model UserRole {
+  id       String  @id @default(uuid())
+  userId   String  @map("user_id")
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId   Int     @map("role_id")
+  role     Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  objectId String? @map("object_id")
+  object   Object? @relation(fields: [objectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, objectId])
+  @@index([userId])
+  @@index([objectId])
+  @@map("user_roles")
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessTokenHash  String    @unique @map("access_token_hash")
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  accessExpiresAt  DateTime  @map("access_expires_at")
+  refreshExpiresAt DateTime  @map("refresh_expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  companyId  String   @map("company_id")
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  actorId    String?  @map("actor_id")
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  payload    Json
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([companyId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model IdempotencyRecord {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  key          String
+  operation    String
+  requestHash  String   @map("request_hash")
+  responseBody Json?    @map("response_body")
+  statusCode   Int?     @map("status_code")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([companyId, key])
+  @@index([createdAt])
+  @@map("idempotency_records")
+}
+
+model FileUpload {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  uploaderId   String?  @map("uploader_id")
+  taskId       String?  @map("task_id")
+  idempotencyKey String @map("idempotency_key")
+  storageKey   String   @unique @map("storage_key")
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  sizeBytes    Int      @map("size_bytes")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([companyId, createdAt])
+  @@index([taskId])
+  @@unique([companyId, idempotencyKey])
+  @@map("file_uploads")
 }
 
 model Stage {
@@ -69,6 +171,7 @@ model Stage {
   objectId  String        @map("object_id")
   object    Object        @relation(fields: [objectId], references: [id], onDelete: Cascade)
   name      String
+  nameUz    String?       @map("name_uz")
   sortOrder Int           @default(0) @map("sort_order")
   sections  WorkSection[]
 
@@ -81,6 +184,7 @@ model WorkSection {
   stageId   String @map("stage_id")
   stage     Stage  @relation(fields: [stageId], references: [id], onDelete: Cascade)
   name      String
+  nameUz    String? @map("name_uz")
   sortOrder Int    @default(0) @map("sort_order")
   tasks     Task[]
 
@@ -96,7 +200,9 @@ model Task {
   assigneeId       String?     @map("assignee_id")
   assignee         User?       @relation(fields: [assigneeId], references: [id])
   title            String
+  titleUz          String?     @map("title_uz")
   description      String?
+  descriptionUz    String?     @map("description_uz")
   status           String      @default("open")
   priority         String      @default("normal")
   tags             String[]    @default([])
@@ -114,6 +220,12 @@ model Task {
   closureGeoLat    Float?      @map("closure_geo_lat")
   closureGeoLng    Float?      @map("closure_geo_lng")
   closedAt         DateTime?   @map("closed_at")
+  submittedAt      DateTime?   @map("submitted_at")
+  reviewedAt       DateTime?   @map("reviewed_at")
+  reviewedById     String?     @map("reviewed_by_id")
+  reviewerId       String?     @map("reviewer_id")
+  reviewer         User?       @relation("TaskReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewNote       String?     @map("review_note")
   escalatedAt      DateTime?   @map("escalated_at")
   createdAt        DateTime    @default(now()) @map("created_at")
   checklist        TaskChecklistItem[]
@@ -122,6 +234,7 @@ model Task {
 
   @@index([workSectionId])
   @@index([assigneeId])
+  @@index([reviewerId])
   @@map("tasks")
 }
 
@@ -130,6 +243,7 @@ model TaskChecklistItem {
   taskId String  @map("task_id")
   task   Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
   label  String
+  labelUz String? @map("label_uz")
   isDone Boolean @default(false) @map("is_done")
 
   @@index([taskId])
@@ -147,9 +261,14 @@ model PhotoReport {
   shootingPoint      String?  @map("shooting_point")
   kind               String   @default("progress") // progress | before | after | hidden_works
   fileUrl            String   @map("file_url")
+  requiredAngles     String[] @default([]) @map("required_angles")
+  photos             Json     @default("[]")
+  status             String   @default("draft") // draft | review | accepted | rejected
   geoLat             Float?   @map("geo_lat")
   geoLng             Float?   @map("geo_lng")
   inspectorSignature String?  @map("inspector_signature")
+  inspectorNote      String?  @map("inspector_note")
+  reviewedAt         DateTime? @map("reviewed_at")
   createdAt          DateTime @default(now()) @map("created_at")
 
   @@index([objectId])
@@ -205,4 +324,80 @@ model FeedReaction {
 
   @@unique([eventId, userId])
   @@map("feed_reactions")
+}
+
+model ProjectDocument {
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  objectId    String   @map("object_id")
+  object      Object   @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  createdById String   @map("created_by_id")
+  createdBy   User     @relation("DocumentCreator", fields: [createdById], references: [id])
+  title       String
+  kind        String
+  version     Int      @default(1)
+  fileUrl     String   @map("file_url")
+  status      String   @default("draft")
+  createdAt   DateTime @default(now()) @map("created_at")
+  approvals   DocumentApproval[]
+
+  @@index([companyId, objectId, createdAt])
+  @@map("project_documents")
+}
+
+model DocumentApproval {
+  id         String          @id @default(uuid())
+  documentId String          @map("document_id")
+  document   ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  actorId    String          @map("actor_id")
+  actor      User            @relation(fields: [actorId], references: [id])
+  decision   String
+  note       String?
+  createdAt  DateTime        @default(now()) @map("created_at")
+
+  @@unique([documentId, actorId])
+  @@map("document_approvals")
+}
+
+model WorkAct {
+  id          String    @id @default(uuid())
+  companyId   String    @map("company_id")
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  objectId    String    @map("object_id")
+  object      Object    @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  createdById String    @map("created_by_id")
+  createdBy   User      @relation("ActCreator", fields: [createdById], references: [id])
+  signedById  String?   @map("signed_by_id")
+  signedBy    User?     @relation("ActSigner", fields: [signedById], references: [id])
+  template    String
+  number      String
+  title       String
+  amount      Decimal   @db.Decimal(14, 2)
+  status      String    @default("draft")
+  pdfUrl      String?   @map("pdf_url")
+  signedAt    DateTime? @map("signed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([companyId, number])
+  @@index([companyId, objectId, createdAt])
+  @@map("work_acts")
+}
+
+model Notification {
+  id         String    @id @default(uuid())
+  companyId  String    @map("company_id")
+  userId     String    @map("user_id")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  objectId   String?   @map("object_id")
+  kind       String
+  title      String
+  body       String
+  entityType String?   @map("entity_type")
+  entityId   String?   @map("entity_id")
+  readAt     DateTime? @map("read_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([companyId, userId, readAt, createdAt])
+  @@map("notifications")
 }

@@ -13,6 +13,7 @@ io.on('connection', (socket) => {
 });
 
 const port = Number(process.env.PORT ?? 4000);
-httpServer.listen(port, () => {
-  console.log(`StroyControl backend listening on :${port}`);
+const host = process.env.HOST ?? '127.0.0.1';
+httpServer.listen(port, host, () => {
+  console.log(`StroyControl backend listening on ${host}:${port}`);
 });

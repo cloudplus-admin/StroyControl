@@ -16,6 +16,9 @@ export async function createPhotoReport(
     shootingPoint?: string;
     kind: string;
     fileUrl: string;
+    requiredAngles?: string[];
+    photos?: { angle: string; uri: string }[];
+    status?: string;
     geoLat?: number;
     geoLng?: number;
     inspectorSignature?: string;
@@ -24,6 +27,15 @@ export async function createPhotoReport(
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!object) return null;
   return prisma.photoReport.create({ data: { objectId, ...input } });
+}
+
+export async function reviewPhotoReport(companyId: string, reportId: string, input: { decision: 'accepted' | 'rejected'; note: string; inspectorSignature: string }) {
+  const report = await prisma.photoReport.findFirst({ where: { id: reportId, object: { companyId } } });
+  if (!report) return null;
+  return prisma.photoReport.update({
+    where: { id: reportId },
+    data: { status: input.decision, inspectorNote: input.note || null, inspectorSignature: input.inspectorSignature, reviewedAt: new Date() },
+  });
 }
 
 /**

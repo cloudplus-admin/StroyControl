@@ -8,8 +8,15 @@ import {
   createTaskSchema,
 } from './schemas';
 import * as objectsService from './service';
+import { requireAnyRole } from '../../auth/authorization';
+import { prisma } from '../../db/prisma';
 
 export const objectsRouter = Router();
+type Auth = { roles: { code: string; objectId: string | null }[] };
+const canAccessObject = (res: Response, objectId: string) => {
+  const auth = res.locals.auth as Auth | undefined;
+  return process.env.NODE_ENV === 'test' && !auth ? true : Boolean(auth?.roles.some((role) => role.objectId === null || role.objectId === objectId));
+};
 
 function requireCompanyId(req: Request, res: Response): string | null {
   const companyId = req.header('x-company-id');
@@ -34,16 +41,18 @@ objectsRouter.get('/', async (req, res, next) => {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
     const objects = await objectsService.listObjects(companyId);
-    res.json(objects);
+    res.json(objects.filter((object) => canAccessObject(res, object.id)));
   } catch (err) {
     next(err);
   }
 });
 
-objectsRouter.post('/', async (req, res, next) => {
+objectsRouter.post('/', requireAnyRole('admin', 'owner', 'pm'), async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
+    const auth = res.locals.auth as Auth | undefined;
+    if (auth && !auth.roles.some((role) => ['admin', 'owner', 'pm'].includes(role.code) && role.objectId === null)) return res.status(403).json({ error: 'Insufficient permissions' });
     const input = createObjectSchema.parse(req.body);
     const object = await objectsService.createObject(companyId, input);
     res.status(201).json(object);
@@ -56,6 +65,7 @@ objectsRouter.get('/:id', async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
+    if (!canAccessObject(res, req.params.id)) return res.status(404).json({ error: 'not_found' });
     const object = await objectsService.getObject(companyId, req.params.id);
     if (!object) return res.status(404).json({ error: 'not_found' });
     res.json(object);
@@ -64,10 +74,11 @@ objectsRouter.get('/:id', async (req, res, next) => {
   }
 });
 
-objectsRouter.patch('/:id', async (req, res, next) => {
+objectsRouter.patch('/:id', requireAnyRole('admin', 'owner', 'pm'), async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
+    if (!canAccessObject(res, req.params.id)) return res.status(404).json({ error: 'not_found' });
     const input = updateObjectSchema.parse(req.body);
     const object = await objectsService.updateObject(companyId, req.params.id, input);
     if (!object) return res.status(404).json({ error: 'not_found' });
@@ -81,6 +92,7 @@ objectsRouter.get('/:id/gantt', async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
+    if (!canAccessObject(res, req.params.id)) return res.status(404).json({ error: 'not_found' });
     const gantt = await objectsService.getGanttData(companyId, req.params.id);
     if (!gantt) return res.status(404).json({ error: 'not_found' });
     res.json(gantt);
@@ -89,36 +101,41 @@ objectsRouter.get('/:id/gantt', async (req, res, next) => {
   }
 });
 
-objectsRouter.post('/:id/stages', async (req, res, next) => {
+objectsRouter.post('/:id/stages', requireAnyRole('admin', 'owner', 'pm'), async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
+    if (!canAccessObject(res, req.params.id)) return res.status(404).json({ error: 'not_found' });
     const input = createStageSchema.parse(req.body);
-    const stage = await objectsService.addStage(companyId, req.params.id, input);
-    if (!stage) return res.status(404).json({ error: 'not_found' });
-    res.status(201).json(stage);
+    const created = await objectsService.addStage(companyId, req.params.id, input);
+    if (!created) return res.status(404).json({ error: 'not_found' });
+    res.status(201).json(created);
   } catch (err) {
     if (handleZodError(err, res, next)) return;
   }
 });
 
-objectsRouter.post('/stages/:stageId/sections', async (req, res, next) => {
+objectsRouter.post('/stages/:stageId/sections', requireAnyRole('admin', 'owner', 'pm'), async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
+    const stage = await prisma.stage.findFirst({ where: { id: req.params.stageId, object: { companyId } }, select: { objectId: true } });
+    if (!stage || !canAccessObject(res, stage.objectId)) return res.status(404).json({ error: 'not_found' });
     const input = createSectionSchema.parse(req.body);
-    const section = await objectsService.addSection(companyId, req.params.stageId, input);
-    if (!section) return res.status(404).json({ error: 'not_found' });
-    res.status(201).json(section);
+    const created = await objectsService.addSection(companyId, req.params.stageId, input);
+    if (!created) return res.status(404).json({ error: 'not_found' });
+    res.status(201).json(created);
   } catch (err) {
     if (handleZodError(err, res, next)) return;
   }
 });
 
-objectsRouter.post('/sections/:sectionId/tasks', async (req, res, next) => {
+objectsRouter.post('/sections/:sectionId/tasks', requireAnyRole('admin', 'owner', 'pm'), async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
+    const section = await prisma.workSection.findFirst({ where: { id: req.params.sectionId, stage: { object: { companyId } } }, select: { stage: { select: { objectId: true } } } });
+    if (!section || !canAccessObject(res, section.stage.objectId)) return res.status(404).json({ error: 'not_found' });
     const input = createTaskSchema.parse(req.body);
     const task = await objectsService.addTask(companyId, req.params.sectionId, input);
     if (!task) return res.status(404).json({ error: 'not_found' });

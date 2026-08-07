@@ -1,4 +1,5 @@
 node_modules/
+.expo/
 dist/
 build/
 .env
@@ -6,4 +7,9 @@ build/
 *.log
 .DS_Store
 *.apk
+*.jks
+*.keystore
+mobile/app/android/
 *.tsbuildinfo
+backend/uploads/
+backups/
