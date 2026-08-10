@@ -110,6 +110,35 @@ describe('auth', () => {
     expect(forbidden.status).toBe(403);
   });
 
+  it('lets an admin replace roles, reset a password, and disable a user', async () => {
+    const { company } = await createAdmin();
+    const foreman = await prisma.role.create({ data: { code: 'foreman', name: 'Прораб' } });
+    await prisma.role.create({ data: { code: 'inspector', name: 'Технадзор' } });
+    const object = await prisma.object.create({ data: { companyId: company.id, name: 'Object A' } });
+    const user = await prisma.user.create({
+      data: { companyId: company.id, email: 'managed@example.com', fullName: 'Managed', passwordHash: await hashPassword('OldPassword123!'), roles: { create: { roleId: foreman.id, objectId: object.id } } },
+    });
+    const adminLogin = await request(app).post('/api/auth/login').send({ email: 'admin@example.com', password: 'StrongPassword123!' });
+    const oldLogin = await request(app).post('/api/auth/login').send({ email: user.email, password: 'OldPassword123!' });
+    expect(oldLogin.status).toBe(200);
+
+    const updated = await request(app).patch(`/api/admin/users/${user.id}`).set('authorization', `Bearer ${adminLogin.body.accessToken}`).send({
+      fullName: 'Managed Inspector',
+      password: 'NewPassword123!',
+      roles: [{ roleCode: 'inspector', objectId: object.id }],
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body).toMatchObject({ fullName: 'Managed Inspector', isActive: true });
+    expect(updated.body.roles).toEqual([{ objectId: object.id, role: { code: 'inspector', name: 'Технадзор' } }]);
+    expect((await request(app).get('/api/objects').set('authorization', `Bearer ${oldLogin.body.accessToken}`)).status).toBe(401);
+    expect((await request(app).post('/api/auth/login').send({ email: user.email, password: 'NewPassword123!' })).status).toBe(200);
+
+    const disabled = await request(app).patch(`/api/admin/users/${user.id}`).set('authorization', `Bearer ${adminLogin.body.accessToken}`).send({ isActive: false });
+    expect(disabled.status).toBe(200);
+    expect(disabled.body.isActive).toBe(false);
+    expect((await request(app).post('/api/auth/login').send({ email: user.email, password: 'NewPassword123!' })).status).toBe(401);
+  });
+
   it('writes an append-only audit entry for an authenticated task closure', async () => {
     const { company } = await createAdmin();
     const object = await prisma.object.create({

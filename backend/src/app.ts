@@ -16,13 +16,16 @@ import { documentsRouter } from './modules/documents/router';
 import { notificationsRouter } from './modules/notifications/router';
 import { prisma } from './db/prisma';
 import { ZodError } from 'zod';
+import { configuredOrigins, securityHeaders } from './http/security';
 
 export function createApp() {
   const app = express();
+  app.disable('x-powered-by');
+  app.use(securityHeaders);
   app.use((req, res, next) => {
-    const allowedOrigin = process.env.WEB_ORIGIN ?? 'http://127.0.0.1:48031';
-    if (req.header('origin') === allowedOrigin) {
-      res.setHeader('access-control-allow-origin', allowedOrigin);
+    const requestOrigin = req.header('origin');
+    if (requestOrigin && configuredOrigins().includes(requestOrigin)) {
+      res.setHeader('access-control-allow-origin', requestOrigin);
       res.setHeader('vary', 'Origin');
       res.setHeader('access-control-allow-headers', 'authorization, content-type, idempotency-key, x-file-name, x-task-id');
       res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');

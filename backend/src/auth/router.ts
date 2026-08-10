@@ -2,16 +2,21 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { authenticateAccessToken, login, refresh, revokeAccessToken } from './service';
 import { asyncRoute } from '../http/async-route';
+import { clearLoginFailures, loginRateLimit, recordFailedLogin } from '../http/security';
 
 export const authRouter = Router();
 
 const loginSchema = z.object({ email: z.string().trim().min(3).max(200), password: z.string().min(3).max(200) });
 const refreshSchema = z.object({ refreshToken: z.string().min(20) });
 
-authRouter.post('/login', asyncRoute(async (req, res) => {
+authRouter.post('/login', loginRateLimit, asyncRoute(async (req, res) => {
   const input = loginSchema.parse(req.body);
   const result = await login(input.email, input.password);
-  if (!result) return res.status(401).json({ error: 'Invalid email or password' });
+  if (!result) {
+    recordFailedLogin(req);
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+  clearLoginFailures(req);
   return res.json(result);
 }));
 

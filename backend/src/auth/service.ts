@@ -28,7 +28,7 @@ export async function login(email: string, password: string) {
     where: { email: email.trim().toLowerCase() },
     include: { company: true, roles: { include: { role: true } } },
   });
-  if (!user || !(await verifyPassword(password, user.passwordHash))) return null;
+  if (!user || !user.isActive || !(await verifyPassword(password, user.passwordHash))) return null;
   const tokens = await issueSession(user.id);
   return {
     ...tokens,
@@ -49,6 +49,8 @@ export async function refresh(refreshToken: string) {
     where: { refreshTokenHash: hashToken(refreshToken) },
   });
   if (!session || session.revokedAt || session.refreshExpiresAt <= new Date()) return null;
+  const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { isActive: true } });
+  if (!user?.isActive) return null;
   return prisma.$transaction(async (tx) => {
     await tx.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
     const accessToken = createToken();
@@ -78,7 +80,7 @@ export async function authenticateAccessToken(accessToken: string) {
     where: { accessTokenHash: hashToken(accessToken) },
     include: { user: { include: { roles: { include: { role: true } } } } },
   });
-  if (!session || session.revokedAt || session.accessExpiresAt <= new Date()) return null;
+  if (!session || session.revokedAt || session.accessExpiresAt <= new Date() || !session.user.isActive) return null;
   return {
     userId: session.user.id,
     companyId: session.user.companyId,

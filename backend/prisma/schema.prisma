@@ -43,6 +43,7 @@ model User {
   fullName     String   @map("full_name")
   passwordHash String   @map("password_hash")
   locale       String   @default("ru")
+  isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   assignedTasks        Task[]
   reviewAssignments    Task[] @relation("TaskReviewer")

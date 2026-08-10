@@ -2,11 +2,12 @@ import 'dotenv/config';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { createApp } from './app';
+import { configuredOrigins } from './http/security';
 
 const app = createApp();
 
 const httpServer = createServer(app);
-const io = new Server(httpServer, { cors: { origin: '*' } });
+const io = new Server(httpServer, { cors: { origin: configuredOrigins() } });
 
 io.on('connection', (socket) => {
   socket.on('disconnect', () => {});
