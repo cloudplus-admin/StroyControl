@@ -80,6 +80,7 @@ import { loadSession, saveSession } from "./src/auth-storage";
 import { syncQueue } from "./src/sync";
 import { refreshServerData } from "./src/bootstrap";
 import { formatDate, formatDateTime, localeCode, uiCopy, type UiCopy } from "./src/i18n";
+import { dateInputToIso, formatDateInput, isoToDateInput } from "./src/dateInput";
 
 const roleFromSession = (session: Session | null, preferred: Role | null): Role | null => {
   const available = (session?.user?.roles ?? []).map((item) => item.code === 'owner' ? 'director' : item.code).filter((code): code is Role => roles.some((item) => item.id === code));
@@ -766,15 +767,15 @@ function TasksScreen({
   const items = allowed.filter((x) => (filter === "all" || x.status === filter) && `${x.title} ${x.stage} ${x.assignee}`.toLowerCase().includes(query.trim().toLowerCase()));
   const task = data.tasks.find((x) => x.id === selected);
   const c = lang === "uz"
-    ? { assignError: "Texnik nazoratchini tayinlab bo'lmadi", serverError: "Server xatosi", search: "Vazifa, bosqich yoki ijrochi bo'yicha qidirish", empty: "Filtr bo'yicha vazifalar yo'q", newTask: "Vazifa qo'yish", title: "Vazifa nomi", chooseObject: "Obyektni tanlang", chooseSection: "Ish bo'limini tanlang", chooseAssignee: "Ijrochini tanlang", noAssignee: "Tayinlanmagan", deadlineHint: "Muddat: YYYY-MM-DD", create: "Vazifa yaratish", cancel: "Bekor qilish", created: "Vazifa yaratildi", createError: "Vazifani yaratib bo'lmadi", required: "Nom, obyekt va bo'limni to'ldiring", loading: "Ma'lumotlar yuklanmoqda...", priority: "Ustuvorlik" }
+    ? { assignError: "Texnik nazoratchini tayinlab bo'lmadi", serverError: "Server xatosi", search: "Vazifa, bosqich yoki ijrochi bo'yicha qidirish", empty: "Filtr bo'yicha vazifalar yo'q", newTask: "Vazifa qo'yish", title: "Vazifa nomi", chooseObject: "Obyektni tanlang", chooseSection: "Ish bo'limini tanlang", chooseAssignee: "Ijrochini tanlang", noAssignee: "Tayinlanmagan", deadlineHint: "Muddat: DD.MM.YYYY", create: "Vazifa yaratish", cancel: "Bekor qilish", created: "Vazifa yaratildi", createError: "Vazifani yaratib bo'lmadi", required: "Nom, obyekt va bo'limni to'ldiring", loading: "Ma'lumotlar yuklanmoqda...", priority: "Ustuvorlik" }
     : lang === "en"
-      ? { assignError: "Could not assign inspector", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter", newTask: "Create task", title: "Task title", chooseObject: "Choose an object", chooseSection: "Choose a work section", chooseAssignee: "Choose an assignee", noAssignee: "Unassigned", deadlineHint: "Deadline: YYYY-MM-DD", create: "Create task", cancel: "Cancel", created: "Task created", createError: "Could not create task", required: "Enter a title, object and section", loading: "Loading data...", priority: "Priority" }
-      : { assignError: "Не удалось назначить технадзор", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет", newTask: "Поставить задачу", title: "Название задачи", chooseObject: "Выберите объект", chooseSection: "Выберите раздел работ", chooseAssignee: "Выберите исполнителя", noAssignee: "Не назначен", deadlineHint: "Срок: ГГГГ-ММ-ДД", create: "Создать задачу", cancel: "Отмена", created: "Задача создана", createError: "Не удалось создать задачу", required: "Заполните название, объект и раздел", loading: "Загружаем данные...", priority: "Приоритет" };
+      ? { assignError: "Could not assign inspector", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter", newTask: "Create task", title: "Task title", chooseObject: "Choose an object", chooseSection: "Choose a work section", chooseAssignee: "Choose an assignee", noAssignee: "Unassigned", deadlineHint: "Deadline: DD.MM.YYYY", create: "Create task", cancel: "Cancel", created: "Task created", createError: "Could not create task", required: "Enter a title, object and section", loading: "Loading data...", priority: "Priority" }
+      : { assignError: "Не удалось назначить технадзор", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет", newTask: "Поставить задачу", title: "Название задачи", chooseObject: "Выберите объект", chooseSection: "Выберите раздел работ", chooseAssignee: "Выберите исполнителя", noAssignee: "Не назначен", deadlineHint: "Срок: ДД.ММ.ГГГГ", create: "Создать задачу", cancel: "Отмена", created: "Задача создана", createError: "Не удалось создать задачу", required: "Заполните название, объект и раздел", loading: "Загружаем данные...", priority: "Приоритет" };
   const extra = lang === 'uz'
-    ? { description: "Tavsif", checklist: "Tekshiruv ro'yxati - har bir band yangi qatordan", edit: "Vazifani tahrirlash", save: "O'zgarishlarni saqlash", saved: "Vazifa yangilandi", saveError: "O'zgarishlarni saqlab bo'lmadi" }
+    ? { description: "Tavsif", checklist: "Tekshiruv ro'yxati - har bir band yangi qatordan", edit: "Vazifani tahrirlash", save: "O'zgarishlarni saqlash", saved: "Vazifa yangilandi", saveError: "O'zgarishlarni saqlab bo'lmadi", invalidDate: "Sanani DD.MM.YYYY formatida kiriting" }
     : lang === 'en'
-      ? { description: 'Description', checklist: 'Checklist - one item per line', edit: 'Edit task', save: 'Save changes', saved: 'Task updated', saveError: 'Could not save changes' }
-      : { description: 'Описание', checklist: 'Чек-лист - каждый пункт с новой строки', edit: 'Редактировать задачу', save: 'Сохранить изменения', saved: 'Задача обновлена', saveError: 'Не удалось сохранить изменения' };
+      ? { description: 'Description', checklist: 'Checklist - one item per line', edit: 'Edit task', save: 'Save changes', saved: 'Task updated', saveError: 'Could not save changes', invalidDate: 'Enter a valid date as DD.MM.YYYY' }
+      : { description: 'Описание', checklist: 'Чек-лист - каждый пункт с новой строки', edit: 'Редактировать задачу', save: 'Сохранить изменения', saved: 'Задача обновлена', saveError: 'Не удалось сохранить изменения', invalidDate: 'Укажи корректную дату в формате ДД.ММ.ГГГГ' };
 
   const loadPlanning = async (project: string) => {
     if (!api || !project) return;
@@ -804,6 +805,8 @@ function TasksScreen({
   const submitTask = async () => {
     if (!api || creating) return;
     if (!createTitle.trim() || !createProjectId || !createSectionId) return Alert.alert(c.createError, c.required);
+    const plannedEnd = createDeadline ? dateInputToIso(createDeadline) : undefined;
+    if (createDeadline && !plannedEnd) return Alert.alert(c.createError, extra.invalidDate);
     setCreating(true);
     try {
       const response = await api.request(`/api/objects/sections/${encodeURIComponent(createSectionId)}/tasks`, {
@@ -813,7 +816,7 @@ function TasksScreen({
           title: createTitle.trim(),
           assigneeId: createAssigneeId || null,
           priority: createPriority,
-          plannedEnd: createDeadline.trim() || undefined,
+          plannedEnd,
           dependsOn: [],
         }),
       });
@@ -834,15 +837,17 @@ function TasksScreen({
   const beginEdit = () => {
     if (!task) return;
     setEditTitle(task.title); setEditDescription(task.description ?? ''); setEditAssigneeId(task.assigneeId ?? '');
-    setEditPriority(task.priority === 'medium' ? 'normal' : task.priority); setEditDeadline(task.due); setEditChecklist(''); setEditing(true);
+    setEditPriority(task.priority === 'medium' ? 'normal' : task.priority); setEditDeadline(isoToDateInput(task.due)); setEditChecklist(''); setEditing(true);
     if (!planningUsers.length && api) void api.request('/api/planning/users').then(async (response) => { if (response.ok) setPlanningUsers(await response.json() as PlanningUser[]); });
   };
 
   const saveEdit = async () => {
     if (!task || !api || savingEdit || !editTitle.trim()) return;
+    const plannedEnd = editDeadline ? dateInputToIso(editDeadline) : null;
+    if (editDeadline && !plannedEnd) return Alert.alert(extra.saveError, extra.invalidDate);
     setSavingEdit(true);
     try {
-      const response = await api.request(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: editTitle.trim(), description: editDescription.trim(), assigneeId: editAssigneeId || null, priority: editPriority, plannedEnd: editDeadline.trim() || null }) });
+      const response = await api.request(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: editTitle.trim(), description: editDescription.trim(), assigneeId: editAssigneeId || null, priority: editPriority, plannedEnd }) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       for (const label of editChecklist.split('\n').map((item) => item.trim()).filter(Boolean)) {
         const checklistResponse = await api.request(`/api/tasks/${encodeURIComponent(task.id)}/checklist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label }) });
@@ -961,7 +966,7 @@ function TasksScreen({
           {planningUsers.map((user) => <Pressable key={user.id} style={user.id === editAssigneeId ? s.primary : s.outlineInline} onPress={() => setEditAssigneeId(user.id)}><Text style={user.id === editAssigneeId ? s.primaryText : s.outlineText}>{user.fullName}</Text></Pressable>)}
           <Text style={s.label}>{c.priority}</Text>
           <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === editPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setEditPriority(priority)}><Text style={priority === editPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
-          <TextInput value={editDeadline} onChangeText={setEditDeadline} placeholder={c.deadlineHint} autoCapitalize="none" style={s.input} />
+          <TextInput value={editDeadline} onChangeText={(value) => setEditDeadline(formatDateInput(value))} placeholder={c.deadlineHint} keyboardType="number-pad" maxLength={10} style={s.input} />
           <TextInput value={editChecklist} onChangeText={setEditChecklist} placeholder={extra.checklist} multiline style={s.input} />
           <Pressable disabled={savingEdit} style={s.primary} onPress={() => void saveEdit()}><Text style={s.primaryText}>{savingEdit ? c.loading : extra.save}</Text></Pressable>
           <Pressable disabled={savingEdit} style={s.outline} onPress={() => setEditing(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
@@ -1067,7 +1072,7 @@ function TasksScreen({
         {planningUsers.map((user) => <Pressable key={user.id} style={user.id === createAssigneeId ? s.primary : s.outlineInline} onPress={() => setCreateAssigneeId(user.id)}><Text style={user.id === createAssigneeId ? s.primaryText : s.outlineText}>{user.fullName}</Text></Pressable>)}
         <Text style={s.label}>{c.priority}</Text>
         <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === createPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setCreatePriority(priority)}><Text style={priority === createPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
-        <TextInput value={createDeadline} onChangeText={setCreateDeadline} placeholder={c.deadlineHint} autoCapitalize="none" style={s.input} />
+        <TextInput value={createDeadline} onChangeText={(value) => setCreateDeadline(formatDateInput(value))} placeholder={c.deadlineHint} keyboardType="number-pad" maxLength={10} style={s.input} />
         <TextInput value={createChecklist} onChangeText={setCreateChecklist} placeholder={extra.checklist} multiline style={s.input} />
         <Pressable disabled={creating} style={s.primary} onPress={() => void submitTask()}><Text style={s.primaryText}>{creating ? c.loading : c.create}</Text></Pressable>
         <Pressable disabled={creating} style={s.outline} onPress={() => setShowCreate(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
