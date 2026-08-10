@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   BackHandler,
   Image,
   KeyboardAvoidingView,
@@ -155,27 +156,67 @@ const copy = uiCopy;
 
 function PhotoViewer({ uri, headers, compact = false }: { uri: string; headers?: Record<string, string>; compact?: boolean }) {
   const [opened, setOpened] = useState(false);
+  const scale = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const gesture = useRef({ scale: 1, x: 0, y: 0, startScale: 1, startX: 0, startY: 0, distance: 0 }).current;
   const source = { uri, headers };
+  const applyTransform = (nextScale: number, x = gesture.x, y = gesture.y) => {
+    gesture.scale = Math.max(1, Math.min(5, nextScale));
+    gesture.x = gesture.scale === 1 ? 0 : x;
+    gesture.y = gesture.scale === 1 ? 0 : y;
+    scale.setValue(gesture.scale);
+    translateX.setValue(gesture.x);
+    translateY.setValue(gesture.y);
+  };
+  const resetZoom = () => {
+    gesture.scale = 1; gesture.x = 0; gesture.y = 0;
+    Animated.parallel([
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true }),
+      Animated.spring(translateX, { toValue: 0, useNativeDriver: true }),
+      Animated.spring(translateY, { toValue: 0, useNativeDriver: true }),
+    ]).start();
+  };
+  const distance = (touches: readonly { pageX: number; pageY: number }[]) => {
+    const [a, b] = touches;
+    return a && b ? Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY) : 0;
+  };
+  const responder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, state) => state.numberActiveTouches > 1 || gesture.scale > 1,
+    onPanResponderGrant: (event) => {
+      gesture.startScale = gesture.scale;
+      gesture.startX = gesture.x;
+      gesture.startY = gesture.y;
+      gesture.distance = distance(event.nativeEvent.touches);
+    },
+    onPanResponderMove: (event, state) => {
+      if (event.nativeEvent.touches.length >= 2) {
+        const currentDistance = distance(event.nativeEvent.touches);
+        if (gesture.distance > 0) applyTransform(gesture.startScale * currentDistance / gesture.distance);
+      } else if (gesture.scale > 1) {
+        applyTransform(gesture.scale, gesture.startX + state.dx, gesture.startY + state.dy);
+      }
+    },
+  })).current;
+  const close = () => { resetZoom(); setOpened(false); };
   return <>
-    <Pressable accessibilityRole="button" onPress={() => setOpened(true)}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Открыть фото на весь экран" onPress={() => setOpened(true)}>
       <Image source={source} resizeMode="contain" style={compact ? s.defectPhoto : s.photo} />
     </Pressable>
-    <Modal visible={opened} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setOpened(false)}>
+    <Modal visible={opened} transparent animationType="fade" statusBarTranslucent onRequestClose={close}>
       <View style={s.photoViewer}>
-        <Pressable style={s.photoViewerClose} onPress={() => setOpened(false)} hitSlop={12}>
+        <Pressable style={s.photoViewerClose} onPress={close} hitSlop={12}>
           <Text style={s.photoViewerCloseText}>×</Text>
         </Pressable>
-        <ScrollView
-          style={s.photoViewerScroll}
-          contentContainerStyle={s.photoViewerContent}
-          maximumZoomScale={4}
-          minimumZoomScale={1}
-          centerContent
-          showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator={false}
-        >
-          <Image source={source} resizeMode="contain" style={s.photoViewerImage} />
-        </ScrollView>
+        <View style={s.photoViewerContent} {...responder.panHandlers}>
+          <Animated.Image source={source} resizeMode="contain" style={[s.photoViewerImage, { transform: [{ translateX }, { translateY }, { scale }] }]} />
+        </View>
+        <View style={s.photoViewerControls}>
+          <Pressable style={s.photoViewerControl} onPress={() => applyTransform(gesture.scale - 0.5)}><Text style={s.photoViewerControlText}>−</Text></Pressable>
+          <Pressable style={s.photoViewerControl} onPress={resetZoom}><Text style={s.photoViewerResetText}>1:1</Text></Pressable>
+          <Pressable style={s.photoViewerControl} onPress={() => applyTransform(gesture.scale + 0.5)}><Text style={s.photoViewerControlText}>+</Text></Pressable>
+        </View>
       </View>
     </Modal>
   </>;
@@ -3041,11 +3082,14 @@ const s = StyleSheet.create({
   queue: { fontSize: 11, color: "#707a75", textAlign: "center", marginTop: 10 },
   photo: { width: "100%", height: 220, borderRadius: 10, marginBottom: 8, backgroundColor: "#eef1ee" },
   photoViewer: { flex: 1, backgroundColor: "rgba(0,0,0,0.96)" },
-  photoViewerScroll: { flex: 1 },
-  photoViewerContent: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
+  photoViewerContent: { flex: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   photoViewerImage: { width: "100%", height: "100%" },
   photoViewerClose: { position: "absolute", zIndex: 2, right: 16, top: 42, width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.18)" },
   photoViewerCloseText: { color: "#fff", fontSize: 34, lineHeight: 38 },
+  photoViewerControls: { position: "absolute", bottom: 34, alignSelf: "center", flexDirection: "row", gap: 12, padding: 8, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.16)" },
+  photoViewerControl: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.4)" },
+  photoViewerControlText: { color: "#fff", fontSize: 30, lineHeight: 34, fontWeight: "700" },
+  photoViewerResetText: { color: "#fff", fontSize: 15, fontWeight: "800" },
   geoCard: {
     backgroundColor: "#eef7f3",
     borderWidth: 1,
