@@ -1,0 +1,11 @@
+[Unit]
+Description=Test the latest StroyControl backup every week
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=15min
+Unit=stroycontrol-restore-test.service
+
+[Install]
+WantedBy=timers.target

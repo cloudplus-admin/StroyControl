@@ -31,13 +31,43 @@ CI настроен в `.github/workflows/ci.yml`: на каждый PR — ус
 Он создает консистентный дамп PostgreSQL, архив каталога загрузок и SHA-256
 контрольные суммы, затем удаляет каталоги старше `BACKUP_RETENTION_DAYS`.
 Проверка целостности выполняется `backend/scripts/verify-backup.sh BACKUP_DIR`.
+Полная проверка восстановления выполняется только в отдельную тестовую базу:
+
+```bash
+POSTGRES_CONTAINER=stroycontrol-test-postgres \
+POSTGRES_USER=stroycontrol \
+RESTORE_DATABASE=stroycontrol_restore_20260810 \
+backend/scripts/restore-backup-test.sh backups/production/20260809T222127Z
+```
+
+Скрипт намеренно принимает только имя базы с префиксом
+`stroycontrol_restore_`, восстанавливает дамп, проверяет наличие таблиц и
+распаковывает uploads во временный каталог. Тестовая база остается для ручной
+проверки и удаляется оператором после приемки.
 Если PostgreSQL работает в Docker, укажи `POSTGRES_CONTAINER`,
 `POSTGRES_USER` и `POSTGRES_DB`; иначе на хосте нужны `pg_dump` и `pg_restore`.
-Для production скрипт следует запускать ежедневным systemd timer или cron от
-отдельного системного пользователя, а каталог бэкапа копировать на другой узел.
+Для production установи `stroycontrol-backup.service` и
+`stroycontrol-backup.timer` из `deploy/systemd/`. Еженедельную проверку полного
+восстановления запускают `stroycontrol-restore-test.service` и соответствующий
+timer. Каталог бэкапа нужно дополнительно копировать на другой узел.
 
 `GET /health` проверяет соединение с PostgreSQL, доступность каталога загрузок и
 минимальный остаток диска (`MIN_UPLOAD_FREE_BYTES`). При проблеме возвращает 503.
+
+Для регулярной проверки API установи `stroycontrol-healthcheck.service` и
+`stroycontrol-healthcheck.timer` из `deploy/systemd/`. Timer вызывает health-check
+каждые пять минут, а systemd сохраняет неуспех в журнале и статусе unit. Внешнее
+оповещение следует подключить к failed unit средствами мониторинга сервера.
+
+После копирования unit-файлов включи все расписания одной командой:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now stroycontrol-maintenance.timer \
+  stroycontrol-backup.timer stroycontrol-restore-test.timer \
+  stroycontrol-healthcheck.timer
+systemctl list-timers 'stroycontrol-*'
+```
 
 ## Серверные процедуры
 

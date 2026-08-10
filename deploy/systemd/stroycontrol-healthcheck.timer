@@ -1,0 +1,11 @@
+[Unit]
+Description=Check StroyControl production health every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=stroycontrol-healthcheck.service
+
+[Install]
+WantedBy=timers.target
