@@ -151,6 +151,8 @@ tasksRouter.post('/:id/reviewer', async (req, res, next) => {
 
 tasksRouter.post('/sla-sweep', async (req, res, next) => {
   try {
+    const roles = res.locals.auth?.roles as Array<{ code: string }> | undefined;
+    if (roles && !roles.some((role) => ['admin', 'owner', 'pm'].includes(role.code))) return res.status(403).json({ error: 'Insufficient permissions' });
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
     const escalated = await tasksService.runSlaSweep(companyId);
@@ -162,6 +164,8 @@ tasksRouter.post('/sla-sweep', async (req, res, next) => {
 
 tasksRouter.post('/recurring-sweep', async (req, res, next) => {
   try {
+    const roles = res.locals.auth?.roles as Array<{ code: string }> | undefined;
+    if (roles && !roles.some((role) => ['admin', 'owner', 'pm'].includes(role.code))) return res.status(403).json({ error: 'Insufficient permissions' });
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
     const created = await tasksService.runRecurringSweep(companyId);

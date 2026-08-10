@@ -38,3 +38,16 @@ CI настроен в `.github/workflows/ci.yml`: на каждый PR — ус
 
 `GET /health` проверяет соединение с PostgreSQL, доступность каталога загрузок и
 минимальный остаток диска (`MIN_UPLOAD_FREE_BYTES`). При проблеме возвращает 503.
+
+## Серверные процедуры
+
+Команда `npm run maintenance` обрабатывает все компании: помечает просроченные
+задачи и создает ежедневные экземпляры повторяющихся задач. После `npm run build`
+установи файлы из `deploy/systemd/` в `/etc/systemd/system/`, проверь пути и
+пользователя в service-файле, затем выполни:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now stroycontrol-maintenance.timer
+systemctl list-timers stroycontrol-maintenance.timer
+```
