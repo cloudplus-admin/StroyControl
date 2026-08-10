@@ -7,6 +7,12 @@ describe('date input', () => {
     expect(formatDateInput('1008')).toBe('10.08');
   });
 
+  it('keeps every digit during sequential Android keyboard input', () => {
+    let value = '';
+    for (const digit of '12092025') value = formatDateInput(`${value}${digit}`);
+    expect(value).toBe('12.09.2025');
+  });
+
   it('converts a valid date to ISO and rejects invalid dates', () => {
     expect(dateInputToIso('10.08.2026')).toBe('2026-08-10');
     expect(dateInputToIso('31.02.2026')).toBeNull();

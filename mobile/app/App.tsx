@@ -80,7 +80,7 @@ import { loadSession, saveSession } from "./src/auth-storage";
 import { syncQueue } from "./src/sync";
 import { refreshServerData } from "./src/bootstrap";
 import { formatDate, formatDateTime, localeCode, uiCopy, type UiCopy } from "./src/i18n";
-import { dateInputToIso, isoToDateInput } from "./src/dateInput";
+import { dateInputToIso, formatDateInput, isoToDateInput } from "./src/dateInput";
 
 const roleFromSession = (session: Session | null, preferred: Role | null): Role | null => {
   const available = (session?.user?.roles ?? []).map((item) => item.code === 'owner' ? 'director' : item.code).filter((code): code is Role => roles.some((item) => item.id === code));
@@ -716,25 +716,22 @@ function ProjectDetails({
   );
 }
 function DateFields({ value, onChange, label, clearLabel }: { value: string; onChange: (value: string) => void; label: string; clearLabel: string }) {
-  const dayRef = useRef<TextInput>(null);
-  const monthRef = useRef<TextInput>(null);
-  const yearRef = useRef<TextInput>(null);
-  const [day = '', month = '', year = ''] = value.split('.');
-  const update = (nextDay: string, nextMonth: string, nextYear: string) => {
-    onChange(nextDay || nextMonth || nextYear ? `${nextDay}.${nextMonth}.${nextYear}` : '');
-  };
+  const inputRef = useRef<TextInput>(null);
   return <View style={s.dateBlock}>
     <View style={s.row}>
       <Text style={[s.label, s.flex]}>{label}</Text>
-      {!!value && <Pressable onPress={() => { onChange(''); dayRef.current?.focus(); }}><Text style={s.link}>{clearLabel}</Text></Pressable>}
+      {!!value && <Pressable onPress={() => { onChange(''); inputRef.current?.focus(); }}><Text style={s.link}>{clearLabel}</Text></Pressable>}
     </View>
-    <View style={s.dateRow}>
-      <TextInput ref={dayRef} value={day} onChangeText={(text) => { const digits = text.replace(/\D/g, '').slice(0, 2); update(digits, month, year); if (digits.length === 2) monthRef.current?.focus(); }} placeholder="ДД" keyboardType="number-pad" maxLength={2} style={s.datePart} />
-      <Text style={s.dateDot}>.</Text>
-      <TextInput ref={monthRef} value={month} onChangeText={(text) => { const digits = text.replace(/\D/g, '').slice(0, 2); update(day, digits, year); if (digits.length === 2) yearRef.current?.focus(); }} onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && !month) dayRef.current?.focus(); }} placeholder="ММ" keyboardType="number-pad" maxLength={2} style={s.datePart} />
-      <Text style={s.dateDot}>.</Text>
-      <TextInput ref={yearRef} value={year} onChangeText={(text) => update(day, month, text.replace(/\D/g, '').slice(0, 4))} onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && !year) monthRef.current?.focus(); }} placeholder="ГГГГ" keyboardType="number-pad" maxLength={4} style={[s.datePart, s.dateYear]} />
-    </View>
+    <TextInput
+      ref={inputRef}
+      value={value}
+      onChangeText={(text) => onChange(formatDateInput(text))}
+      placeholder="ДД.ММ.ГГГГ"
+      keyboardType="number-pad"
+      maxLength={10}
+      selectTextOnFocus={false}
+      style={s.field}
+    />
   </View>;
 }
 
