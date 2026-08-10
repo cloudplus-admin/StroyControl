@@ -80,7 +80,7 @@ import { loadSession, saveSession } from "./src/auth-storage";
 import { syncQueue } from "./src/sync";
 import { refreshServerData } from "./src/bootstrap";
 import { formatDate, formatDateTime, localeCode, uiCopy, type UiCopy } from "./src/i18n";
-import { dateInputToIso, formatDateInput, isoToDateInput } from "./src/dateInput";
+import { dateInputToIso, isoToDateInput } from "./src/dateInput";
 
 const roleFromSession = (session: Session | null, preferred: Role | null): Role | null => {
   const available = (session?.user?.roles ?? []).map((item) => item.code === 'owner' ? 'director' : item.code).filter((code): code is Role => roles.some((item) => item.id === code));
@@ -715,6 +715,29 @@ function ProjectDetails({
     </View>
   );
 }
+function DateFields({ value, onChange, label, clearLabel }: { value: string; onChange: (value: string) => void; label: string; clearLabel: string }) {
+  const dayRef = useRef<TextInput>(null);
+  const monthRef = useRef<TextInput>(null);
+  const yearRef = useRef<TextInput>(null);
+  const [day = '', month = '', year = ''] = value.split('.');
+  const update = (nextDay: string, nextMonth: string, nextYear: string) => {
+    onChange(nextDay || nextMonth || nextYear ? `${nextDay}.${nextMonth}.${nextYear}` : '');
+  };
+  return <View style={s.dateBlock}>
+    <View style={s.row}>
+      <Text style={[s.label, s.flex]}>{label}</Text>
+      {!!value && <Pressable onPress={() => { onChange(''); dayRef.current?.focus(); }}><Text style={s.link}>{clearLabel}</Text></Pressable>}
+    </View>
+    <View style={s.dateRow}>
+      <TextInput ref={dayRef} value={day} onChangeText={(text) => { const digits = text.replace(/\D/g, '').slice(0, 2); update(digits, month, year); if (digits.length === 2) monthRef.current?.focus(); }} placeholder="ДД" keyboardType="number-pad" maxLength={2} style={s.datePart} />
+      <Text style={s.dateDot}>.</Text>
+      <TextInput ref={monthRef} value={month} onChangeText={(text) => { const digits = text.replace(/\D/g, '').slice(0, 2); update(day, digits, year); if (digits.length === 2) yearRef.current?.focus(); }} onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && !month) dayRef.current?.focus(); }} placeholder="ММ" keyboardType="number-pad" maxLength={2} style={s.datePart} />
+      <Text style={s.dateDot}>.</Text>
+      <TextInput ref={yearRef} value={year} onChangeText={(text) => update(day, month, text.replace(/\D/g, '').slice(0, 4))} onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && !year) monthRef.current?.focus(); }} placeholder="ГГГГ" keyboardType="number-pad" maxLength={4} style={[s.datePart, s.dateYear]} />
+    </View>
+  </View>;
+}
+
 function TasksScreen({
   t,
   lang,
@@ -767,10 +790,10 @@ function TasksScreen({
   const items = allowed.filter((x) => (filter === "all" || x.status === filter) && `${x.title} ${x.stage} ${x.assignee}`.toLowerCase().includes(query.trim().toLowerCase()));
   const task = data.tasks.find((x) => x.id === selected);
   const c = lang === "uz"
-    ? { assignError: "Texnik nazoratchini tayinlab bo'lmadi", serverError: "Server xatosi", search: "Vazifa, bosqich yoki ijrochi bo'yicha qidirish", empty: "Filtr bo'yicha vazifalar yo'q", newTask: "Vazifa qo'yish", title: "Vazifa nomi", chooseObject: "Obyektni tanlang", chooseSection: "Ish bo'limini tanlang", chooseAssignee: "Ijrochini tanlang", noAssignee: "Tayinlanmagan", deadlineHint: "Muddat: DD.MM.YYYY", create: "Vazifa yaratish", cancel: "Bekor qilish", created: "Vazifa yaratildi", createError: "Vazifani yaratib bo'lmadi", required: "Nom, obyekt va bo'limni to'ldiring", loading: "Ma'lumotlar yuklanmoqda...", priority: "Ustuvorlik" }
+    ? { assignError: "Texnik nazoratchini tayinlab bo'lmadi", serverError: "Server xatosi", search: "Vazifa, bosqich yoki ijrochi bo'yicha qidirish", empty: "Filtr bo'yicha vazifalar yo'q", newTask: "Vazifa qo'yish", title: "Vazifa nomi", chooseObject: "Obyektni tanlang", chooseSection: "Ish bo'limini tanlang", chooseAssignee: "Ijrochini tanlang", noAssignee: "Tayinlanmagan", deadlineHint: "Muddat", clearDate: "Tozalash", create: "Vazifa yaratish", cancel: "Bekor qilish", created: "Vazifa yaratildi", createError: "Vazifani yaratib bo'lmadi", required: "Nom, obyekt va bo'limni to'ldiring", loading: "Ma'lumotlar yuklanmoqda...", priority: "Ustuvorlik" }
     : lang === "en"
-      ? { assignError: "Could not assign inspector", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter", newTask: "Create task", title: "Task title", chooseObject: "Choose an object", chooseSection: "Choose a work section", chooseAssignee: "Choose an assignee", noAssignee: "Unassigned", deadlineHint: "Deadline: DD.MM.YYYY", create: "Create task", cancel: "Cancel", created: "Task created", createError: "Could not create task", required: "Enter a title, object and section", loading: "Loading data...", priority: "Priority" }
-      : { assignError: "Не удалось назначить технадзор", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет", newTask: "Поставить задачу", title: "Название задачи", chooseObject: "Выберите объект", chooseSection: "Выберите раздел работ", chooseAssignee: "Выберите исполнителя", noAssignee: "Не назначен", deadlineHint: "Срок: ДД.ММ.ГГГГ", create: "Создать задачу", cancel: "Отмена", created: "Задача создана", createError: "Не удалось создать задачу", required: "Заполните название, объект и раздел", loading: "Загружаем данные...", priority: "Приоритет" };
+      ? { assignError: "Could not assign inspector", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter", newTask: "Create task", title: "Task title", chooseObject: "Choose an object", chooseSection: "Choose a work section", chooseAssignee: "Choose an assignee", noAssignee: "Unassigned", deadlineHint: "Deadline", clearDate: "Clear", create: "Create task", cancel: "Cancel", created: "Task created", createError: "Could not create task", required: "Enter a title, object and section", loading: "Loading data...", priority: "Priority" }
+      : { assignError: "Не удалось назначить технадзор", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет", newTask: "Поставить задачу", title: "Название задачи", chooseObject: "Выберите объект", chooseSection: "Выберите раздел работ", chooseAssignee: "Выберите исполнителя", noAssignee: "Не назначен", deadlineHint: "Срок", clearDate: "Очистить", create: "Создать задачу", cancel: "Отмена", created: "Задача создана", createError: "Не удалось создать задачу", required: "Заполните название, объект и раздел", loading: "Загружаем данные...", priority: "Приоритет" };
   const extra = lang === 'uz'
     ? { description: "Tavsif", checklist: "Tekshiruv ro'yxati - har bir band yangi qatordan", edit: "Vazifani tahrirlash", save: "O'zgarishlarni saqlash", saved: "Vazifa yangilandi", saveError: "O'zgarishlarni saqlab bo'lmadi", invalidDate: "Sanani DD.MM.YYYY formatida kiriting" }
     : lang === 'en'
@@ -886,13 +909,15 @@ function TasksScreen({
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
-        if (selected) setSelected(null);
+        if (editing) setEditing(false);
+        else if (showCreate) setShowCreate(false);
+        else if (selected) setSelected(null);
         else backHome();
         return true;
       },
     );
     return () => subscription.remove();
-  }, [selected]);
+  }, [editing, selected, showCreate]);
   const labels: Record<TaskStatus | "all", string> =
     lang === "uz"
       ? {
@@ -958,6 +983,7 @@ function TasksScreen({
         <Text style={s.h1}>{task.title}</Text>
         {canCreate && !editing && <Pressable style={s.outline} onPress={beginEdit}><Text style={s.outlineText}>{extra.edit}</Text></Pressable>}
         {canCreate && editing && <View style={s.card}>
+          <Pressable disabled={savingEdit} onPress={() => setEditing(false)}><Text style={s.link}>‹ {c.cancel}</Text></Pressable>
           <Text style={s.cardTitle}>{extra.edit}</Text>
           <TextInput value={editTitle} onChangeText={setEditTitle} placeholder={c.title} style={s.input} />
           <TextInput value={editDescription} onChangeText={setEditDescription} placeholder={extra.description} multiline style={s.input} />
@@ -966,7 +992,7 @@ function TasksScreen({
           {planningUsers.map((user) => <Pressable key={user.id} style={user.id === editAssigneeId ? s.primary : s.outlineInline} onPress={() => setEditAssigneeId(user.id)}><Text style={user.id === editAssigneeId ? s.primaryText : s.outlineText}>{user.fullName}</Text></Pressable>)}
           <Text style={s.label}>{c.priority}</Text>
           <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === editPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setEditPriority(priority)}><Text style={priority === editPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
-          <TextInput value={editDeadline} onChangeText={(value) => setEditDeadline(formatDateInput(value))} placeholder={c.deadlineHint} keyboardType="number-pad" maxLength={10} style={s.input} />
+          <DateFields value={editDeadline} onChange={setEditDeadline} label={c.deadlineHint} clearLabel={c.clearDate} />
           <TextInput value={editChecklist} onChangeText={setEditChecklist} placeholder={extra.checklist} multiline style={s.input} />
           <Pressable disabled={savingEdit} style={s.primary} onPress={() => void saveEdit()}><Text style={s.primaryText}>{savingEdit ? c.loading : extra.save}</Text></Pressable>
           <Pressable disabled={savingEdit} style={s.outline} onPress={() => setEditing(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
@@ -1060,6 +1086,7 @@ function TasksScreen({
       <Text style={s.h1}>{t.myTasks}</Text>
       {canCreate && !showCreate && <Pressable style={s.primary} onPress={openCreate}><Text style={s.primaryText}>+ {c.newTask}</Text></Pressable>}
       {canCreate && showCreate && <View style={s.card}>
+        <Pressable disabled={creating} onPress={() => setShowCreate(false)}><Text style={s.link}>‹ {c.cancel}</Text></Pressable>
         <Text style={s.cardTitle}>{c.newTask}</Text>
         <TextInput value={createTitle} onChangeText={setCreateTitle} placeholder={c.title} style={s.input} />
         <Text style={s.label}>{c.chooseObject}</Text>
@@ -1072,7 +1099,7 @@ function TasksScreen({
         {planningUsers.map((user) => <Pressable key={user.id} style={user.id === createAssigneeId ? s.primary : s.outlineInline} onPress={() => setCreateAssigneeId(user.id)}><Text style={user.id === createAssigneeId ? s.primaryText : s.outlineText}>{user.fullName}</Text></Pressable>)}
         <Text style={s.label}>{c.priority}</Text>
         <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === createPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setCreatePriority(priority)}><Text style={priority === createPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
-        <TextInput value={createDeadline} onChangeText={(value) => setCreateDeadline(formatDateInput(value))} placeholder={c.deadlineHint} keyboardType="number-pad" maxLength={10} style={s.input} />
+        <DateFields value={createDeadline} onChange={setCreateDeadline} label={c.deadlineHint} clearLabel={c.clearDate} />
         <TextInput value={createChecklist} onChangeText={setCreateChecklist} placeholder={extra.checklist} multiline style={s.input} />
         <Pressable disabled={creating} style={s.primary} onPress={() => void submitTask()}><Text style={s.primaryText}>{creating ? c.loading : c.create}</Text></Pressable>
         <Pressable disabled={creating} style={s.outline} onPress={() => setShowCreate(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
@@ -3095,6 +3122,20 @@ const s = StyleSheet.create({
     textAlignVertical: "top",
     marginBottom: 8,
   },
+  dateBlock: { marginBottom: 8 },
+  dateRow: { flexDirection: "row", alignItems: "center" },
+  datePart: {
+    width: 64,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#dce1dd",
+    borderRadius: 12,
+    paddingVertical: 12,
+    textAlign: "center",
+    fontSize: 17,
+  },
+  dateYear: { width: 88 },
+  dateDot: { paddingHorizontal: 6, fontSize: 22, fontWeight: "700", color: "#69736f" },
   field: {
     backgroundColor: "#f7f8f6",
     borderWidth: 1,

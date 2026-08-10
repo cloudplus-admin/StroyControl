@@ -2,12 +2,12 @@
   "expo": {
     "name": "StroyControl",
     "slug": "stroycontrol",
-    "version": "1.0.15",
+    "version": "1.0.17",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "uz.cloudplus.stroycontrol",
-      "versionCode": 28,
+      "versionCode": 30,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW"
       ],
