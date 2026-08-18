@@ -54,6 +54,10 @@ export type Defect = {
   createdAt: string;
   beforeUri?: string;
   afterUri?: string;
+  beforePhotos?: string[];
+  afterPhotos?: string[];
+  dueAt?: string;
+  resolvedAt?: string;
 };
 
 export type QualityReport = {

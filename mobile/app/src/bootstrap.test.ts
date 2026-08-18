@@ -27,6 +27,20 @@ describe('mergeBootstrap', () => {
     expect(result.messages[0]).toMatchObject({ id: 'feed-1', text: 'Server message', reactions: 2 });
     expect(result.qualityReports[0]).toMatchObject({ id: 'photo-1', projectId: 'o1', status: 'accepted' });
     expect(result.defects[0]).toMatchObject({ id: 'defect-1', status: 'fixing' });
+    expect(result.projects[0]?.defectsOpen).toBe(1);
+  });
+
+  it('preserves defect evidence and lifecycle dates from bootstrap', () => {
+    const defectData = { ...response, objects: [{ ...response.objects[0]!, defects: [{ ...response.objects[0]!.defects[0]!, beforePhotos: ['https://cdn.test/before.jpg'], afterPhotos: ['https://cdn.test/after.jpg'], dueAt: '2026-08-10T00:00:00Z', resolvedAt: '2026-08-09T00:00:00Z' }] }] };
+
+    expect(mergeBootstrap(seedData, defectData).defects[0]).toMatchObject({
+      beforePhotos: ['https://cdn.test/before.jpg'],
+      afterPhotos: ['https://cdn.test/after.jpg'],
+      beforeUri: 'https://cdn.test/before.jpg',
+      afterUri: 'https://cdn.test/after.jpg',
+      dueAt: '2026-08-10T00:00:00Z',
+      resolvedAt: '2026-08-09T00:00:00Z',
+    });
   });
 
   it('maps all task closure photos from bootstrap', () => {

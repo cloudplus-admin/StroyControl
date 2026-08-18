@@ -5,7 +5,7 @@ type ServerTask = { id: string; objectId: string; stage: string; title: string; 
 type ServerDocument = { id: string; objectId: string; name: string; version: number; uri: string; status: string; createdAt: string };
 type ServerAct = { id: string; objectId: string; template: string; number: string; title: string; amount: number; status: string; pdfUri?: string | null; signedAt?: string | null; createdAt: string };
 type ServerPhotoReport = { id: string; objectId: string; taskId?: string | null; point?: string | null; kind: string; fileUrl: string; requiredAngles?: string[]; photos?: { angle: string; uri: string }[]; status?: string; inspectorSignature?: string | null; inspectorNote?: string | null; reviewedAt?: string | null; createdAt: string };
-type ServerDefect = { id: string; objectId: string; description: string; status: string; createdAt: string };
+type ServerDefect = { id: string; objectId: string; description: string; status: string; beforePhotos?: string[]; afterPhotos?: string[]; dueAt?: string | null; resolvedAt?: string | null; createdAt: string };
 type ServerFeedEvent = { id: string; objectId: string; author: string; body: string; parentEventId?: string | null; reactions: number; createdAt: string };
 type ServerObject = { id: string; name: string; address: string; latitude?: number | null; longitude?: number | null; progress: number; tasks: ServerTask[]; documents?: ServerDocument[]; acts?: ServerAct[]; photoReports?: ServerPhotoReport[]; defects?: ServerDefect[]; feed?: ServerFeedEvent[] };
 type BootstrapResponse = { serverTime: string; reviewers?: { id: string; name: string; objectIds: string[] }[]; objects: ServerObject[] };
@@ -49,7 +49,8 @@ export function mergeBootstrap(data: AppData, response: BootstrapResponse): AppD
   const projects: Project[] = response.objects.map((object) => {
     const dueDates = object.tasks.map((task) => task.due).filter(Boolean).sort();
     const open = object.tasks.filter((task) => task.status !== 'done').length;
-    return { id: object.id, name: object.name, address: object.address, latitude: object.latitude ?? undefined, longitude: object.longitude ?? undefined, progress: object.progress, plan: object.progress, deadline: dueDates.at(-1) ?? '-', forecast: dueDates.at(-1) ?? '-', risk: object.tasks.some((task) => task.status === 'overdue') ? 'high' : 'low', tasksOpen: open, defectsOpen: 0 };
+    const defectsOpen = (object.defects ?? []).filter((defect) => defect.status !== 'closed').length;
+    return { id: object.id, name: object.name, address: object.address, latitude: object.latitude ?? undefined, longitude: object.longitude ?? undefined, progress: object.progress, plan: object.progress, deadline: dueDates.at(-1) ?? '-', forecast: dueDates.at(-1) ?? '-', risk: object.tasks.some((task) => task.status === 'overdue') ? 'high' : 'low', tasksOpen: open, defectsOpen };
   });
   const tasks: Task[] = response.objects.flatMap((object) => object.tasks.map((task) => ({
     id: task.id, projectId: task.objectId, title: task.title, description: task.description, stage: task.stage, due: task.due,
@@ -64,7 +65,11 @@ export function mergeBootstrap(data: AppData, response: BootstrapResponse): AppD
   const acts = response.objects.flatMap((object) => (object.acts ?? []).map((act) => ({ id: act.id, projectId: act.objectId, template: (['completed', 'hidden', 'acceptance'].includes(act.template) ? act.template : 'completed') as 'completed' | 'hidden' | 'acceptance', number: act.number, title: act.title, contractor: '', customer: '', amount: act.amount, date: act.signedAt?.slice(0, 10) ?? act.createdAt.slice(0, 10), notes: '', signature: [], pdfUri: act.pdfUri ? canonicalMediaUrl(act.pdfUri) : undefined, status: act.status, signedAt: act.signedAt ?? undefined, createdAt: act.createdAt })));
   const messages: FeedMessage[] = response.objects.flatMap((object) => (object.feed ?? []).map((event) => ({ id: event.id, projectId: event.objectId, author: event.author, text: event.body, parentId: event.parentEventId ?? undefined, reactions: event.reactions, createdAt: event.createdAt })));
   const qualityReports: QualityReport[] = response.objects.flatMap((object) => (object.photoReports ?? []).map((report) => ({ id: report.id, projectId: report.objectId, taskId: report.taskId ?? '', point: report.point ?? '', kind: report.kind === 'hidden_works' ? 'hidden' : 'progress', requiredAngles: report.requiredAngles?.length ? report.requiredAngles : [report.point ?? 'photo'], photos: report.photos?.length ? report.photos.map((photo) => ({ ...photo, uri: canonicalMediaUrl(photo.uri) })) : [{ angle: report.point ?? 'photo', uri: canonicalMediaUrl(report.fileUrl) }], status: (['draft', 'review', 'accepted', 'rejected'].includes(report.status ?? '') ? report.status : report.kind === 'hidden_works' && !report.inspectorSignature ? 'review' : 'accepted') as QualityReport['status'], inspectorNote: report.inspectorNote ?? undefined, reviewedAt: report.reviewedAt ?? undefined, createdAt: report.createdAt })));
-  const defects: Defect[] = response.objects.flatMap((object) => (object.defects ?? []).map((defect) => ({ id: defect.id, projectId: defect.objectId, title: defect.description, status: defect.status === 'in_progress' ? 'fixing' : defect.status === 'verified' ? 'review' : defect.status === 'closed' ? 'closed' : 'open', createdAt: defect.createdAt })));
+  const defects: Defect[] = response.objects.flatMap((object) => (object.defects ?? []).map((defect) => {
+    const beforePhotos = (defect.beforePhotos ?? []).map(canonicalMediaUrl);
+    const afterPhotos = (defect.afterPhotos ?? []).map(canonicalMediaUrl);
+    return { id: defect.id, projectId: defect.objectId, title: defect.description, status: defect.status === 'in_progress' ? 'fixing' : defect.status === 'verified' ? 'review' : defect.status === 'closed' ? 'closed' : 'open', beforePhotos, afterPhotos, beforeUri: beforePhotos[0], afterUri: afterPhotos[0], dueAt: defect.dueAt ?? undefined, resolvedAt: defect.resolvedAt ?? undefined, createdAt: defect.createdAt };
+  }));
   const keepQueued = <T extends { id: string }>(server: T[], local: T[], types: string[]) => {
     const queued = new Set(queue.filter((item) => types.includes(item.type)).map((item) => item.entityId));
     const serverIds = new Set(server.map((item) => item.id));

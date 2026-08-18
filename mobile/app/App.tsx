@@ -1806,7 +1806,7 @@ function QualityScreen({
         const file = await upload.json() as { url: string };
         uploadedPhotos.push({ angle: photo.angle, uri: file.url });
       }
-      const response = await api.request(`/api/objects/${encodeURIComponent(report.projectId)}/photo-reports`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ authorId: user.id, taskId: report.taskId || undefined, shootingPoint: report.point, kind: report.kind === 'hidden' ? 'hidden_works' : 'progress', fileUrl: uploadedPhotos[0]?.uri, requiredAngles: report.requiredAngles, photos: uploadedPhotos, status: 'review' }) });
+      const response = await api.request(`/api/objects/${encodeURIComponent(report.projectId)}/photo-reports`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ authorId: user.id, taskId: report.taskId || undefined, shootingPoint: report.point, kind: report.kind === 'hidden' ? 'hidden_works' : 'progress', fileUrl: uploadedPhotos[0]?.uri, requiredAngles: report.requiredAngles, photos: uploadedPhotos, status: 'review', inspectorSignature: report.kind === 'hidden' ? user.fullName || user.id : undefined }) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const created = await response.json() as { id: string; createdAt: string };
       updateData({ ...local, qualityReports: local.qualityReports.map((item) => item.id === report.id ? { ...item, id: created.id, photos: uploadedPhotos, status: 'review', createdAt: created.createdAt } : item), queue: local.queue.filter((item) => !(item.type === 'quality.updated' && item.entityId === report.id)) });
