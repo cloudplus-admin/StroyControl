@@ -46,6 +46,28 @@ type Defect = {
   dueAt?: string;
 };
 
+type Coordinates = { latitude: number; longitude: number; accuracy: number };
+
+export function getCurrentCoordinates(): Promise<Coordinates> {
+  if (!navigator.geolocation) {
+    return Promise.reject(new Error("Геолокация не поддерживается этим браузером"));
+  }
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => resolve({ latitude: coords.latitude, longitude: coords.longitude, accuracy: coords.accuracy }),
+      (error) => {
+        const messages: Record<number, string> = {
+          1: "Доступ к геолокации запрещен. Разрешите его в настройках браузера",
+          2: "Не удалось определить местоположение. Проверьте GPS или сеть",
+          3: "Истекло время определения местоположения. Попробуйте еще раз",
+        };
+        reject(new Error(messages[error.code] ?? "Не удалось получить геолокацию"));
+      },
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 },
+    );
+  });
+}
+
 function useObjects() {
   const [objects, setObjects] = useState<ObjectSummary[]>([]);
   const [objectId, setObjectId] = useState("");
@@ -210,6 +232,7 @@ export function Acceptance({ session }: { session: UserSession }) {
   const [note, setNote] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
+  const [isClosing, setIsClosing] = useState(false);
   const canClose = session.user.roles.some((role) =>
     ["admin", "owner", "pm", "foreman", "subcontractor"].includes(role.code),
   );
@@ -231,17 +254,29 @@ export function Acceptance({ session }: { session: UserSession }) {
     setTask(await api.json(`/api/tasks/${id}`));
   const close = async () => {
     if (!task || !file) return;
-    const photo = await upload(file, task.id);
-    await api.json(`/api/tasks/${task.id}/close`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "idempotency-key": crypto.randomUUID(),
-      },
-      body: JSON.stringify({ photoUrls: [photo.url], geoLat: 0, geoLng: 0 }),
-    });
-    await select(task.id);
-    await load();
+    setError("");
+    setIsClosing(true);
+    try {
+      const coordinates = await getCurrentCoordinates();
+      const photo = await upload(file, task.id);
+      await api.json(`/api/tasks/${task.id}/close`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          photoUrls: [photo.url],
+          geoLat: coordinates.latitude,
+          geoLng: coordinates.longitude,
+        }),
+      });
+      setFile(null);
+      await select(task.id);
+      await load();
+    } finally {
+      setIsClosing(false);
+    }
   };
   const review = async (decision: "accepted" | "rejected") => {
     if (!task) return;
@@ -301,11 +336,12 @@ export function Acceptance({ session }: { session: UserSession }) {
                   />
                 </label>
                 <button
-                  disabled={!file}
+                  disabled={!file || isClosing}
                   onClick={() => void close().catch((e) => setError(String(e)))}
                 >
-                  Закрыть задачу
+                  {isClosing ? "Определяем геолокацию..." : "Закрыть задачу"}
                 </button>
+                <small>При закрытии браузер запросит доступ к точной геолокации.</small>
               </>
             )}
             {canReview && task.status === "review" && (
