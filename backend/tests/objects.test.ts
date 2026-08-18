@@ -135,6 +135,12 @@ describe('GET /api/objects/:id/gantt', () => {
     expect(res.body.objectId).toBe(created.body.id);
     expect(res.body.stages.length).toBe(3);
     expect(res.body.criticalPath).toEqual({ taskIds: [], durationDays: 0 });
+    expect(res.body.forecast).toEqual({
+      plannedCompletion: null,
+      forecastCompletion: null,
+      delayDays: 0,
+      basis: 'current_schedule',
+    });
   });
 
   it('returns 404 for an unknown object', async () => {
@@ -175,6 +181,23 @@ describe('GET /api/objects/:id/gantt', () => {
     const saved = await prisma.task.findUniqueOrThrow({ where: { id: task.id } });
     expect(saved.baselineStart?.toISOString()).toBe('2026-02-01T00:00:00.000Z');
     expect(saved.baselineEnd?.toISOString()).toBe('2026-02-05T00:00:00.000Z');
+  });
+
+  it('forecasts completion shift from the longest current delay', async () => {
+    const company = await seedCompany();
+    const object = await prisma.object.create({ data: { companyId: company.id, name: 'Forecast' } });
+    const stage = await prisma.stage.create({ data: { objectId: object.id, name: 'Stage' } });
+    const section = await prisma.workSection.create({ data: { stageId: stage.id, name: 'Section' } });
+    const yesterday = new Date(Date.now() - 86_400_000);
+    const completion = new Date(Date.now() + 5 * 86_400_000);
+    await prisma.task.create({ data: { workSectionId: section.id, title: 'Delayed', plannedEnd: yesterday, status: 'in_progress' } });
+    await prisma.task.create({ data: { workSectionId: section.id, title: 'Final', plannedEnd: completion, status: 'open' } });
+
+    const res = await request(app).get(`/api/objects/${object.id}/gantt`).set('x-company-id', company.id);
+    expect(res.status).toBe(200);
+    expect(res.body.forecast.delayDays).toBeGreaterThanOrEqual(1);
+    expect(new Date(res.body.forecast.forecastCompletion).getTime()).toBeGreaterThan(completion.getTime());
+    expect(res.body.forecast.basis).toBe('current_overdue_tasks');
   });
 
   it('rejects dependencies from another object', async () => {

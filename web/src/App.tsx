@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api, UserSession } from "./api";
 import "./styles.css";
+import { Acceptance, PhotoControl, Schedule } from "./Operations";
 
 type Lang = "ru" | "uz";
 type ObjectSummary = {
@@ -277,7 +278,7 @@ function Workspace({
   const canSignActs = session.user.roles.some((role) =>
     ["inspector", "customer"].includes(role.code),
   );
-  const [tab, setTab] = useState<"objects" | "documents" | "team">("objects");
+  const [tab, setTab] = useState<"objects" | "schedule" | "acceptance" | "photo" | "documents" | "team">("objects");
   return (
     <div className="shell">
       <aside>
@@ -292,6 +293,9 @@ function Workspace({
           >
             {c.objects}
           </button>
+          <button className={tab === "schedule" ? "active" : ""} onClick={() => setTab("schedule")}>График Ганта</button>
+          <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>Приемка задач</button>
+          <button className={tab === "photo" ? "active" : ""} onClick={() => setTab("photo")}>Фотоконтроль</button>
           <button
             className={tab === "documents" ? "active" : ""}
             onClick={() => setTab("documents")}
@@ -316,6 +320,12 @@ function Workspace({
       <main className="workspace">
         {tab === "objects" ? (
           <Objects lang={lang} c={c} canPlan={canPlan} />
+        ) : tab === "schedule" ? (
+          <Schedule lang={lang} canPlan={canPlan} />
+        ) : tab === "acceptance" ? (
+          <Acceptance session={session} />
+        ) : tab === "photo" ? (
+          <PhotoControl session={session} />
         ) : tab === "documents" ? (
           <Documents
             lang={lang}

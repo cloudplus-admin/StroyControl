@@ -259,6 +259,19 @@ export async function getGanttData(companyId: string, objectId: string) {
 
   const now = new Date();
   const allTasks = object.stages.flatMap((stage) => stage.sections.flatMap((section) => section.tasks));
+  const plannedEnds = allTasks.flatMap((task) => task.plannedEnd ? [new Date(task.plannedEnd)] : []);
+  const plannedCompletion = plannedEnds.length
+    ? new Date(Math.max(...plannedEnds.map((date) => date.getTime())))
+    : null;
+  const unfinishedTasks = allTasks.filter((task) => !['done', 'cancelled'].includes(task.status));
+  const overdueDays = unfinishedTasks.reduce((maximum, task) => {
+    if (!task.plannedEnd) return maximum;
+    const delay = Math.max(0, Math.ceil((now.getTime() - new Date(task.plannedEnd).getTime()) / 86_400_000));
+    return Math.max(maximum, delay);
+  }, 0);
+  const forecastCompletion = plannedCompletion
+    ? new Date(plannedCompletion.getTime() + overdueDays * 86_400_000)
+    : null;
   let criticalPath: { taskIds: string[]; durationDays: number };
   try {
     criticalPath = calculateCriticalPath(allTasks);
@@ -268,6 +281,12 @@ export async function getGanttData(companyId: string, objectId: string) {
   return {
     objectId: object.id,
     objectName: object.name,
+    forecast: {
+      plannedCompletion,
+      forecastCompletion,
+      delayDays: overdueDays,
+      basis: overdueDays > 0 ? 'current_overdue_tasks' : 'current_schedule',
+    },
     criticalPath,
     stages: object.stages.map((stage) => ({
       id: stage.id,

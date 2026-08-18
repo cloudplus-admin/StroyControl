@@ -35,6 +35,13 @@ const detail = {
   }],
 };
 
+const gantt = {
+  objectName: object.name,
+  criticalPath: { taskIds: ['task-1'], durationDays: 7 },
+  forecast: { plannedCompletion: '2026-08-20', forecastCompletion: '2026-08-23', delayDays: 3 },
+  stages: [{ id: 'stage-1', name: 'Коробка', sections: [{ id: 'section-1', name: 'Монолит', tasks: [{ ...detail.stages[0].sections[0].tasks[0], plannedStart: '2026-08-13', plannedEnd: '2026-08-20', isCritical: true, riskLevel: 'overdue' }] }] }],
+};
+
 const document = {
   id: 'document-1', title: 'Рабочий проект', kind: 'project', version: 1,
   fileUrl: 'https://example.com/project.pdf', status: 'review',
@@ -65,6 +72,10 @@ function mockApi() {
   vi.mocked(api.json).mockImplementation(async (path: string) => {
     if (path === '/api/objects') return [object];
     if (path === `/api/objects/${object.id}`) return detail;
+    if (path === `/api/objects/${object.id}/gantt`) return gantt;
+    if (path === '/api/tasks/task-1') return { ...gantt.stages[0].sections[0].tasks[0], closurePhotos: ['https://example.com/photo.jpg'] };
+    if (path.endsWith('/photo-reports')) return [];
+    if (path.endsWith('/defects')) return [];
     if (path === '/api/planning/users') return [];
     if (path === '/api/admin/users') return [];
     if (path === '/api/admin/roles') return [];
@@ -139,5 +150,35 @@ describe('role-based web workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Создать акт' })).toBe(canManage ? screen.getByRole('heading', { name: 'Создать акт' }) : null);
     expect(screen.queryByRole('button', { name: 'Согласовать' })).toBe(canDecide ? screen.getByRole('button', { name: 'Согласовать' }) : null);
     expect(screen.queryByRole('button', { name: 'Подписать акт' })).toBe(canSign ? screen.getByRole('button', { name: 'Подписать акт' }) : null);
+  });
+
+  it('shows the calculated completion forecast and critical path', async () => {
+    await renderRole('pm');
+    await userEvent.click(screen.getByRole('button', { name: 'График Ганта' }));
+    expect(await screen.findByText('Сдвиг +3 дн.')).toBeInTheDocument();
+    expect(screen.getByText('Критический путь: 7 дн.')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'График Ганта' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Зафиксировать baseline' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['foreman', true, false],
+    ['inspector', false, true],
+    ['customer', false, false],
+  ])('enforces task acceptance actions for %s', async (role, canClose, canReview) => {
+    await renderRole(role);
+    await userEvent.click(screen.getByRole('button', { name: 'Приемка задач' }));
+    await userEvent.click(await screen.findByRole('button', { name: /Залить плиту/ }));
+    expect(await screen.findByRole('heading', { name: 'Залить плиту' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Закрыть задачу' })).toBe(canClose ? screen.getByRole('button', { name: 'Закрыть задачу' }) : null);
+    expect(screen.queryByRole('button', { name: 'Принять' })).toBe(canReview ? null : null);
+  });
+
+  it('shows photo and defect creation to a foreman', async () => {
+    await renderRole('foreman');
+    await userEvent.click(screen.getByRole('button', { name: 'Фотоконтроль' }));
+    expect(await screen.findByRole('heading', { name: 'Фотоконтроль и замечания' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Новый фотоотчет' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Новое замечание' })).toBeInTheDocument();
   });
 });

@@ -1,0 +1,67 @@
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { api, UserSession } from "./api";
+
+type Lang = "ru" | "uz";
+type ObjectSummary = { id: string; name: string };
+type Gantt = {
+  objectName: string;
+  criticalPath: { taskIds: string[]; durationDays: number };
+  forecast: { plannedCompletion?: string; forecastCompletion?: string; delayDays: number };
+  stages: { id: string; name: string; sections: { id: string; name: string; tasks: GanttTask[] }[] }[];
+};
+type GanttTask = { id: string; title: string; status: string; plannedStart?: string; plannedEnd?: string; baselineStart?: string; baselineEnd?: string; isCritical: boolean; riskLevel: string };
+type TaskDetail = GanttTask & { closurePhotos?: string[]; reviewNote?: string };
+type PhotoReport = { id: string; kind: string; fileUrl: string; status: string; shootingPoint?: string; photos: { angle: string; uri: string }[] };
+type Defect = { id: string; description: string; status: string; beforePhotos: string[]; afterPhotos: string[]; dueAt?: string };
+
+function useObjects() {
+  const [objects, setObjects] = useState<ObjectSummary[]>([]);
+  const [objectId, setObjectId] = useState("");
+  useEffect(() => { void api.json<ObjectSummary[]>("/api/objects").then((items) => { setObjects(items); setObjectId(items[0]?.id ?? ""); }); }, []);
+  return { objects, objectId, setObjectId };
+}
+
+function Picker({ objects, objectId, setObjectId }: ReturnType<typeof useObjects>) {
+  return <label className="object-picker">Объект<select value={objectId} onChange={(event) => setObjectId(event.target.value)}>{objects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>;
+}
+
+export function Schedule({ canPlan }: { lang: Lang; canPlan: boolean }) {
+  const source = useObjects();
+  const [data, setData] = useState<Gantt | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => { if (source.objectId) setData(await api.json<Gantt>(`/api/objects/${source.objectId}/gantt`)); }, [source.objectId]);
+  useEffect(() => { void load().catch((e) => setError(String(e))); }, [load]);
+  const tasks = useMemo(() => data?.stages.flatMap((stage) => stage.sections.flatMap((section) => section.tasks.map((task) => ({ ...task, group: `${stage.name} / ${section.name}` })))) ?? [], [data]);
+  const dates = tasks.flatMap((task) => [task.plannedStart, task.plannedEnd].filter(Boolean).map((value) => new Date(value!).getTime()));
+  const min = dates.length ? Math.min(...dates) : Date.now(); const max = dates.length ? Math.max(...dates) : min + 86_400_000;
+  return <><header><div><p className="eyebrow">ПЛАН И КРИТИЧЕСКИЙ ПУТЬ</p><h1>График Ганта</h1></div>{canPlan && <button onClick={() => void api.json(`/api/objects/${source.objectId}/baseline`, { method: "POST" }).then(load)}>Зафиксировать baseline</button>}</header><Picker {...source}/>{error && <p className="error">{error}</p>}{data && <><div className="forecast"><strong>Прогноз сдачи: {data.forecast.forecastCompletion ? new Date(data.forecast.forecastCompletion).toLocaleDateString("ru-RU") : "нет данных"}</strong><span className={data.forecast.delayDays ? "delay" : ""}>{data.forecast.delayDays ? `Сдвиг +${data.forecast.delayDays} дн.` : "По плану"}</span><span>Критический путь: {data.criticalPath.durationDays} дн.</span></div><section className="gantt" aria-label="График Ганта">{tasks.map((task) => { const start = task.plannedStart ? new Date(task.plannedStart).getTime() : min; const end = task.plannedEnd ? new Date(task.plannedEnd).getTime() : start; const span = Math.max(1, max - min); return <article key={task.id} className={task.isCritical ? "critical" : ""}><div><strong>{task.title}</strong><small>{task.group}</small></div><div className="gantt-track"><i style={{ left: `${((start - min) / span) * 100}%`, width: `${Math.max(2, ((end - start) / span) * 100)}%` }}/></div><span>{task.riskLevel}</span></article>; })}</section></>}</>;
+}
+
+async function upload(file: File, taskId?: string) {
+  const response = await api.request("/api/uploads", { method: "POST", headers: { "content-type": file.type, "idempotency-key": crypto.randomUUID(), "x-file-name": file.name, ...(taskId ? { "x-task-id": taskId } : {}) }, body: file });
+  if (!response.ok) throw new Error(`Загрузка: HTTP ${response.status}`);
+  return response.json() as Promise<{ url: string }>;
+}
+
+export function Acceptance({ session }: { session: UserSession }) {
+  const source = useObjects(); const [gantt, setGantt] = useState<Gantt | null>(null); const [task, setTask] = useState<TaskDetail | null>(null); const [note, setNote] = useState(""); const [file, setFile] = useState<File | null>(null); const [error, setError] = useState("");
+  const canClose = session.user.roles.some((role) => ["admin", "owner", "pm", "foreman", "subcontractor"].includes(role.code));
+  const canReview = session.user.roles.some((role) => ["admin", "owner", "pm", "inspector"].includes(role.code));
+  const load = useCallback(async () => { if (source.objectId) setGantt(await api.json(`/api/objects/${source.objectId}/gantt`)); }, [source.objectId]); useEffect(() => { void load(); }, [load]);
+  const tasks = gantt?.stages.flatMap((stage) => stage.sections.flatMap((section) => section.tasks)) ?? [];
+  const select = async (id: string) => setTask(await api.json(`/api/tasks/${id}`));
+  const close = async () => { if (!task || !file) return; const photo = await upload(file, task.id); await api.json(`/api/tasks/${task.id}/close`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ photoUrls: [photo.url], geoLat: 0, geoLng: 0 }) }); await select(task.id); await load(); };
+  const review = async (decision: "accepted" | "rejected") => { if (!task) return; await api.json(`/api/tasks/${task.id}/review`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ decision, note }) }); await select(task.id); await load(); };
+  return <><header><div><p className="eyebrow">ЗАКРЫТИЕ И ТЕХНАДЗОР</p><h1>Приемка задач</h1></div></header><Picker {...source}/>{error && <p className="error">{error}</p>}<div className="task-layout"><section>{tasks.map((item) => <button className="acceptance-row" key={item.id} onClick={() => void select(item.id)}><strong>{item.title}</strong><span className={`task-status ${item.status}`}>{item.status}</span></button>)}</section>{task && <section className="panel"><h3>{task.title}</h3>{task.closurePhotos?.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer">Фото закрытия</a>)}{task.reviewNote && <p>{task.reviewNote}</p>}{canClose && !["review", "done"].includes(task.status) && <><label>Фото<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)}/></label><button disabled={!file} onClick={() => void close().catch((e) => setError(String(e)))}>Закрыть задачу</button></>}{canReview && task.status === "review" && <><label>Комментарий<input value={note} onChange={(e) => setNote(e.target.value)}/></label><div className="decision-actions"><button onClick={() => void review("accepted")}>Принять</button><button className="danger" disabled={!note.trim()} onClick={() => void review("rejected")}>Отклонить</button></div></>}</section>}</div></>;
+}
+
+export function PhotoControl({ session }: { session: UserSession }) {
+  const source = useObjects(); const [reports, setReports] = useState<PhotoReport[]>([]); const [defects, setDefects] = useState<Defect[]>([]); const [error, setError] = useState(""); const [file, setFile] = useState<File | null>(null); const [description, setDescription] = useState("");
+  const canWrite = session.user.roles.some((role) => ["admin", "owner", "pm", "foreman", "subcontractor", "inspector"].includes(role.code));
+  const canReview = session.user.roles.some((role) => ["admin", "owner", "pm", "inspector"].includes(role.code));
+  const load = useCallback(async () => { if (!source.objectId) return; const [photoItems, defectItems] = await Promise.all([api.json<PhotoReport[]>(`/api/objects/${source.objectId}/photo-reports`), api.json<Defect[]>(`/api/objects/${source.objectId}/defects`)]); setReports(photoItems); setDefects(defectItems); }, [source.objectId]); useEffect(() => { void load().catch((e) => setError(String(e))); }, [load]);
+  const createReport = async (event: FormEvent) => { event.preventDefault(); if (!file) return; const photo = await upload(file); await api.json(`/api/objects/${source.objectId}/photo-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ authorId: session.user.id, kind: "progress", fileUrl: photo.url, requiredAngles: ["общий"], photos: [{ angle: "общий", uri: photo.url }], status: "review" }) }); setFile(null); await load(); };
+  const createDefect = async (event: FormEvent) => { event.preventDefault(); if (!file) return; const photo = await upload(file); await api.json(`/api/objects/${source.objectId}/defects`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reportedBy: session.user.id, description, beforePhotos: [photo.url] }) }); setDescription(""); setFile(null); await load(); };
+  const review = async (id: string, decision: "accepted" | "rejected") => { await api.json(`/api/photo-reports/${id}/review`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision, note: "" }) }); await load(); };
+  return <><header><div><p className="eyebrow">ФОТОФИКСАЦИЯ И КАЧЕСТВО</p><h1>Фотоконтроль и замечания</h1></div></header><Picker {...source}/>{error && <p className="error">{error}</p>}<div className="document-layout"><section className="document-column"><h2>Фотоотчеты</h2>{reports.map((report) => <article className="document-card" key={report.id}><a href={report.fileUrl} target="_blank" rel="noreferrer">Открыть фото</a><span className={`task-status ${report.status}`}>{report.status}</span>{canReview && report.status === "review" && <div className="decision-actions"><button onClick={() => void review(report.id, "accepted")}>Принять</button><button className="danger" onClick={() => void review(report.id, "rejected")}>Отклонить</button></div>}</article>)}{canWrite && <form className="panel compact" onSubmit={createReport}><h3>Новый фотоотчет</h3><label>Фото<input required type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)}/></label><button>Отправить</button></form>}</section><section className="document-column"><h2>Замечания</h2>{defects.map((defect) => <article className="document-card" key={defect.id}><strong>{defect.description}</strong><span className={`task-status ${defect.status}`}>{defect.status}</span>{defect.beforePhotos.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer">Фото до</a>)}</article>)}{canWrite && <form className="panel compact" onSubmit={createDefect}><h3>Новое замечание</h3><label>Описание<textarea required value={description} onChange={(e) => setDescription(e.target.value)}/></label><label>Фото<input required type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)}/></label><button>Создать замечание</button></form>}</section></div></>;
+}
