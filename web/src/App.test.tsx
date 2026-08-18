@@ -180,5 +180,12 @@ describe('role-based web workspace', () => {
     expect(await screen.findByRole('heading', { name: 'Фотоконтроль и замечания' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Новый фотоотчет' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Новое замечание' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Скрытые работы - на приемку' })).not.toBeInTheDocument();
+  });
+
+  it('allows an inspector to submit hidden works for review', async () => {
+    await renderRole('inspector');
+    await userEvent.click(screen.getByRole('button', { name: 'Фотоконтроль' }));
+    expect(await screen.findByRole('option', { name: 'Скрытые работы - на приемку' })).toBeInTheDocument();
   });
 });
