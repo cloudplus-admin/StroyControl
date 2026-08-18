@@ -30,6 +30,18 @@ describe('mergeBootstrap', () => {
     expect(result.projects[0]?.defectsOpen).toBe(1);
   });
 
+  it('restores field accounting modules from server records', () => {
+    const withRecords = { ...response, mobileRecords: [
+      { id: 'supply-server', kind: 'supply', objectId: 'o1', updatedAt: '2026-08-03T04:00:00Z', payload: { id: 'supply-server', projectId: 'o1', item: 'Цемент', quantity: '20 т', neededAt: '2026-08-10', author: 'Прораб', status: 'ordered', createdAt: '2026-08-03T04:00:00Z' } },
+      { id: 'crew-server', kind: 'crew', objectId: null, updatedAt: '2026-08-03T04:00:00Z', payload: { id: 'crew-server', name: 'Монолитчики', specialty: 'Монолит', foreman: 'Бригадир', defaultWorkers: 12, active: true, updatedAt: '2026-08-03T04:00:00Z' } },
+    ] };
+
+    const result = mergeBootstrap(seedData, withRecords);
+
+    expect(result.supplyRequests).toEqual([expect.objectContaining({ id: 'supply-server', status: 'ordered' })]);
+    expect(result.crews).toEqual([expect.objectContaining({ id: 'crew-server', defaultWorkers: 12 })]);
+  });
+
   it('preserves defect evidence and lifecycle dates from bootstrap', () => {
     const defectData = { ...response, objects: [{ ...response.objects[0]!, defects: [{ ...response.objects[0]!.defects[0]!, beforePhotos: ['https://cdn.test/before.jpg'], afterPhotos: ['https://cdn.test/after.jpg'], dueAt: '2026-08-10T00:00:00Z', resolvedAt: '2026-08-09T00:00:00Z' }] }] };
 

@@ -21,6 +21,7 @@ model Company {
   uploads   FileUpload[]
   documents ProjectDocument[]
   workActs  WorkAct[]
+  mobileRecords MobileRecord[]
 
   @@map("companies")
 }
@@ -86,6 +87,7 @@ model Object {
   userRoles    UserRole[]
   documents    ProjectDocument[]
   workActs     WorkAct[]
+  mobileRecords MobileRecord[]
 
   @@map("objects")
 }
@@ -421,4 +423,21 @@ model Notification {
   @@index([companyId, userId, readAt, createdAt])
   @@index([deliveryStatus, createdAt])
   @@map("notifications")
+}
+
+model MobileRecord {
+  id        String   @id @default(uuid())
+  companyId String   @map("company_id")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  objectId  String?  @map("object_id")
+  object    Object?  @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  clientId  String   @map("client_id")
+  kind      String
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([companyId, kind, clientId])
+  @@index([companyId, objectId, kind, updatedAt])
+  @@map("mobile_records")
 }

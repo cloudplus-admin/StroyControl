@@ -1,14 +1,37 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiClient } from './api';
-import { addDefectPhoto, addMessage, addQualityPhoto, closeTask, createDefect, reviewQualityReport, reviewTask, seedData, submitQualityReport, toggleChecklist } from './domain';
+import { addDefectPhoto, addDocument, addMessage, addQualityPhoto, closeTask, createDefect, createSupplyRequest, reviewQualityReport, reviewTask, seedData, submitQualityReport, toggleChecklist } from './domain';
 import { isServerSyncQueueItem, retryDelayMs, syncQueue } from './sync';
 
 describe('syncQueue', () => {
-  it('marks defect operations as server-syncable and leaves local-only modules outside the blocking queue', () => {
+  it('marks all implemented durable operations as server-syncable', () => {
     const base = { id: 'q', entityId: 'e', createdAt: new Date().toISOString(), idempotencyKey: 'q', status: 'pending' as const, attempts: 0 };
     expect(isServerSyncQueueItem({ ...base, type: 'defect.created' })).toBe(true);
-    expect(isServerSyncQueueItem({ ...base, type: 'journal.created' })).toBe(false);
-    expect(isServerSyncQueueItem({ ...base, type: 'stock.updated' })).toBe(false);
+    expect(isServerSyncQueueItem({ ...base, type: 'journal.created' })).toBe(true);
+    expect(isServerSyncQueueItem({ ...base, type: 'stock.updated' })).toBe(true);
+  });
+  it('syncs an offline supply request through the durable mobile record endpoint', async () => {
+    const queued = createSupplyRequest(seedData, 'Цемент', '20 т', '2026-08-10', '2026-08-03T04:00:00Z');
+    const request = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+
+    const result = await syncQueue(queued, { request } as unknown as ApiClient);
+
+    expect(result.queue).toHaveLength(0);
+    expect(request).toHaveBeenCalledWith(expect.stringContaining('/api/mobile/records/supply/'), expect.objectContaining({ method: 'PUT' }));
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toMatchObject({ payload: { item: 'Цемент', status: 'draft' } });
+  });
+  it('keeps an uploaded document URL and stops retrying a permanent create error', async () => {
+    const queued = addDocument(seedData, 'Схема.pdf', 'file:///scheme.pdf', '2026-08-03T04:00:00Z');
+    const uploadFile = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: 'https://api.test/api/uploads/scheme' }), { status: 201 }));
+    const request = vi.fn().mockResolvedValue(new Response('{"error":"forbidden"}', { status: 403 }));
+
+    const result = await syncQueue(queued, { request, uploadFile } as unknown as ApiClient);
+
+    expect(result.documents[0]?.uri).toBe('https://api.test/api/uploads/scheme');
+    expect(result.queue[0]).toMatchObject({ status: 'conflict', attempts: 0, lastError: 'sync_http_403' });
+    await syncQueue(result, { request, uploadFile } as unknown as ApiClient, Date.now() + 60_000);
+    expect(uploadFile).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);
   });
   it('отправляет накопленные изменения чек-листа и очищает старую очередь', async () => {
     const queued = toggleChecklist(seedData, 't-101', 'c-101-1');

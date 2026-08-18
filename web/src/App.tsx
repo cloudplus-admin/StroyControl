@@ -105,6 +105,7 @@ const copy = {
     schedule: "График Ганта",
     acceptance: "Приемка задач",
     photoControl: "Фотоконтроль",
+    fieldRecords: "Учет и безопасность",
   },
   uz: {
     loginError: "Kirish xatosi",
@@ -158,6 +159,7 @@ const copy = {
     schedule: "Gantt jadvali",
     acceptance: "Vazifalarni qabul qilish",
     photoControl: "Foto nazorat",
+    fieldRecords: "Hisob va xavfsizlik",
   },
 } as const;
 type Copy = typeof copy.ru | typeof copy.uz;
@@ -292,7 +294,7 @@ function Workspace({
   const canPlan = session.user.roles.some((role) =>
     ["admin", "owner", "pm"].includes(role.code),
   );
-  const [tab, setTab] = useState<"objects" | "schedule" | "acceptance" | "photo" | "documents" | "team">("objects");
+  const [tab, setTab] = useState<"objects" | "schedule" | "acceptance" | "photo" | "records" | "documents" | "team">("objects");
   return (
     <div className="shell">
       <aside>
@@ -310,6 +312,7 @@ function Workspace({
           <button className={tab === "schedule" ? "active" : ""} onClick={() => setTab("schedule")}>{c.schedule}</button>
           <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>{c.acceptance}</button>
           <button className={tab === "photo" ? "active" : ""} onClick={() => setTab("photo")}>{c.photoControl}</button>
+          <button className={tab === "records" ? "active" : ""} onClick={() => setTab("records")}>{c.fieldRecords}</button>
           <button
             className={tab === "documents" ? "active" : ""}
             onClick={() => setTab("documents")}
@@ -340,6 +343,8 @@ function Workspace({
           <Acceptance lang={lang} session={session} />
         ) : tab === "photo" ? (
           <PhotoControl lang={lang} session={session} />
+        ) : tab === "records" ? (
+          <FieldRecords lang={lang} />
         ) : tab === "documents" ? (
           <Documents
             lang={lang}
@@ -351,6 +356,31 @@ function Workspace({
       </main>
     </div>
   );
+}
+
+type MobileRecord = { id: string; kind: string; payload: Record<string, unknown>; updatedAt: string };
+
+function FieldRecords({ lang }: { lang: Lang }) {
+  const [records, setRecords] = useState<MobileRecord[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    void api.json<{ mobileRecords?: MobileRecord[] }>(`/api/mobile/bootstrap?locale=${lang}`)
+      .then((result) => setRecords(result.mobileRecords ?? []))
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "HTTP error"));
+  }, [lang]);
+  const names: Record<string, string> = lang === "uz" ? {
+    journal: "Ish jurnali", supply: "Ta'minot", tool: "Asboblar", material: "Materiallar", stockMovement: "Ombor harakati", crew: "Brigadalar", shift: "Smenalar", safetyChecklist: "Xavfsizlik tekshiruvi", safetyViolation: "Xavfsizlik buzilishi",
+  } : {
+    journal: "Журнал работ", supply: "Снабжение", tool: "Инструменты", material: "Материалы", stockMovement: "Движения склада", crew: "Бригады", shift: "Смены", safetyChecklist: "Чек-листы ОТ", safetyViolation: "Нарушения ОТ",
+  };
+  const grouped = Object.entries(names).map(([kind, title]) => ({ kind, title, records: records.filter((record) => record.kind === kind) }));
+  return <section><div className="page-title"><div><p className="eyebrow">APK - API - WEB</p><h1>{lang === "uz" ? "Hisob va xavfsizlik" : "Учет и безопасность"}</h1></div></div>
+    {error && <p className="error">{error}</p>}
+    <div className="document-grid">{grouped.map((group) => <article className="document-card" key={group.kind}><div className="document-head"><div><strong>{group.title}</strong><small>{lang === "uz" ? "Server yozuvlari" : "Серверных записей"}: {group.records.length}</small></div></div>
+      {group.records.slice(0, 5).map((record) => <p key={record.id}>{String(record.payload.name ?? record.payload.item ?? record.payload.title ?? record.payload.text ?? record.id)}</p>)}
+      {group.records.length === 0 && <p className="muted">{lang === "uz" ? "Hozircha yozuv yo'q" : "Записей пока нет"}</p>}
+    </article>)}</div>
+  </section>;
 }
 
 async function uploadPdf(file: File) {

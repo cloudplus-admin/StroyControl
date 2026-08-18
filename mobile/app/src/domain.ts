@@ -242,14 +242,14 @@ export function addJournalEntry(data: AppData, text: string, lang: Lang, audioUr
   const id = `j-${Date.parse(now)}`;
   const author = lang === 'uz' ? 'Prorab' : lang === 'en' ? 'Foreman' : 'Прораб';
   const defaultText = lang === 'uz' ? 'Jurnal ovozli yozuvi' : lang === 'en' ? 'Voice journal entry' : 'Голосовая запись журнала';
-  const entry: JournalEntry = { id, projectId: 'p1', author, text: text.trim() || defaultText, createdAt: now, audioUri, lang };
+  const entry: JournalEntry = { id, projectId: data.projects[0]?.id ?? 'p1', author, text: text.trim() || defaultText, createdAt: now, audioUri, lang };
   return enqueue({ ...data, journal: [entry, ...data.journal] }, 'journal.created', id, now);
 }
 
 export function addDocument(data: AppData, name: string, uri: string, now = new Date().toISOString()): AppData {
   const version = Math.max(0, ...data.documents.filter((x) => x.name === name).map((x) => x.version)) + 1;
   const id = `doc-${Date.parse(now)}`;
-  const document: ProjectDocument = { id, projectId: 'p1', name, version, uri, createdAt: now };
+  const document: ProjectDocument = { id, projectId: data.projects[0]?.id ?? 'p1', name, version, uri, createdAt: now };
   return enqueue({ ...data, documents: [document, ...data.documents] }, 'document.created', id, now);
 }
 
@@ -257,7 +257,7 @@ export function createSupplyRequest(data: AppData, item: string, quantity: strin
   if (!item.trim() || !quantity.trim() || !neededAt.trim()) return data;
   const id = `sr-${Date.parse(now)}`;
   const author = lang === 'uz' ? 'Joriy foydalanuvchi' : lang === 'en' ? 'Current user' : 'Текущий пользователь';
-  const request: SupplyRequest = { id, projectId: 'p1', item: item.trim(), quantity: quantity.trim(), neededAt: neededAt.trim(), author, status: 'draft', createdAt: now };
+  const request: SupplyRequest = { id, projectId: data.projects[0]?.id ?? 'p1', item: item.trim(), quantity: quantity.trim(), neededAt: neededAt.trim(), author, status: 'draft', createdAt: now };
   return enqueue({ ...data, supplyRequests: [request, ...data.supplyRequests] }, 'supply.created', id, now);
 }
 

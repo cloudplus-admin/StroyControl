@@ -101,3 +101,12 @@ documentsRouter.post('/acts/:id/sign', asyncRoute(async (req, res) => {
   });
   return res.json(signed);
 }));
+
+documentsRouter.patch('/acts/:id/pdf', asyncRoute(async (req, res) => {
+  const auth = res.locals.auth as Auth;
+  const input = z.object({ pdfUrl: z.string().url() }).parse(req.body);
+  const act = await prisma.workAct.findFirst({ where: { id: req.params.id, companyId: auth.companyId } });
+  if (!act) return res.status(404).json({ error: 'not_found' });
+  if (!canManage(auth, act.objectId)) return res.status(403).json({ error: 'forbidden' });
+  return res.json(await prisma.workAct.update({ where: { id: act.id }, data: { pdfUrl: input.pdfUrl } }));
+}));

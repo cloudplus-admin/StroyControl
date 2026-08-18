@@ -8,7 +8,8 @@ type ServerPhotoReport = { id: string; objectId: string; taskId?: string | null;
 type ServerDefect = { id: string; objectId: string; description: string; status: string; beforePhotos?: string[]; afterPhotos?: string[]; dueAt?: string | null; resolvedAt?: string | null; createdAt: string };
 type ServerFeedEvent = { id: string; objectId: string; author: string; body: string; parentEventId?: string | null; reactions: number; createdAt: string };
 type ServerObject = { id: string; name: string; address: string; latitude?: number | null; longitude?: number | null; progress: number; tasks: ServerTask[]; documents?: ServerDocument[]; acts?: ServerAct[]; photoReports?: ServerPhotoReport[]; defects?: ServerDefect[]; feed?: ServerFeedEvent[] };
-type BootstrapResponse = { serverTime: string; reviewers?: { id: string; name: string; objectIds: string[] }[]; objects: ServerObject[] };
+type MobileRecord = { id: string; kind: string; objectId?: string | null; payload: Record<string, unknown>; updatedAt: string };
+type BootstrapResponse = { serverTime: string; reviewers?: { id: string; name: string; objectIds: string[] }[]; mobileRecords?: MobileRecord[]; objects: ServerObject[] };
 
 function mapStatus(status: string): Task['status'] {
   if (status === 'done') return 'done';
@@ -75,7 +76,28 @@ export function mergeBootstrap(data: AppData, response: BootstrapResponse): AppD
     const serverIds = new Set(server.map((item) => item.id));
     return [...local.filter((item) => queued.has(item.id) && !serverIds.has(item.id)), ...server];
   };
-  return { ...reconciledData, projects, tasks, reviewers: response.reviewers ?? [], documents, acts, messages: keepQueued(messages, data.messages, ['message.created']), qualityReports: keepQueued(qualityReports, data.qualityReports, ['quality.updated', 'quality.reviewed']), defects: keepQueued(defects, data.defects, ['defect.created', 'defect.updated']) };
+  const records = response.mobileRecords ?? [];
+  const payloads = <T extends { id: string }>(kind: string) => records.filter((record) => record.kind === kind).map((record) => record.payload as T);
+  const stockRecords = records.filter((record) => record.kind === 'stockMovement');
+  const stockMovements = stockRecords.map((record) => record.payload as unknown as AppData['stockMovements'][number]);
+  const stockMaterials = stockRecords.map((record) => record.payload.material as AppData['materials'][number]).filter(Boolean);
+  const mergedMaterials = new Map(payloads<AppData['materials'][number]>('material').map((item) => [item.id, item]));
+  stockMaterials.forEach((item) => mergedMaterials.set(item.id, item));
+  return {
+    ...reconciledData, projects, tasks, reviewers: response.reviewers ?? [], documents, acts,
+    messages: keepQueued(messages, data.messages, ['message.created']),
+    qualityReports: keepQueued(qualityReports, data.qualityReports, ['quality.updated', 'quality.reviewed']),
+    defects: keepQueued(defects, data.defects, ['defect.created', 'defect.updated']),
+    journal: keepQueued(payloads('journal'), data.journal, ['journal.created']),
+    supplyRequests: keepQueued(payloads('supply'), data.supplyRequests, ['supply.created', 'supply.updated']),
+    tools: keepQueued(payloads('tool'), data.tools, ['tool.updated']),
+    materials: keepQueued([...mergedMaterials.values()], data.materials, ['material.updated', 'stock.updated']),
+    stockMovements: keepQueued(stockMovements, data.stockMovements, ['stock.updated']),
+    crews: keepQueued(payloads('crew'), data.crews, ['crew.updated']),
+    shifts: keepQueued(payloads('shift'), data.shifts, ['shift.created', 'shift.updated']),
+    safetyChecklists: keepQueued(payloads('safetyChecklist'), data.safetyChecklists, ['safety.checklist']),
+    safetyViolations: keepQueued(payloads('safetyViolation'), data.safetyViolations, ['safety.violation', 'safety.updated']),
+  };
 }
 
 export async function refreshServerData(data: AppData, api: ApiClient, lang: Lang = 'ru'): Promise<AppData> {

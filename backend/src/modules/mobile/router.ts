@@ -38,7 +38,11 @@ mobileRouter.get('/bootstrap', async (req, res, next) => {
         stages: { orderBy: { sortOrder: 'asc' }, include: { sections: { orderBy: { sortOrder: 'asc' }, include: { tasks: { where: inspectorOnly ? { OR: [{ assigneeId: auth.userId }, { reviewerId: auth.userId }] } : {}, orderBy: { createdAt: 'asc' }, include: { checklist: true, assignee: true, reviewer: { select: { id: true, fullName: true } } } } } } } },
       },
     });
-    return res.json({ serverTime: new Date().toISOString(), reviewers: reviewers.map((reviewer) => ({ id: reviewer.id, name: reviewer.fullName, objectIds: reviewer.roles.flatMap((role) => role.objectId ? [role.objectId] : []) })), objects: objects.map((object) => {
+    const mobileRecords = await prisma.mobileRecord.findMany({
+      where: { companyId: auth.companyId, ...(hasCompanyScope ? {} : { OR: [{ objectId: null }, { objectId: { in: objectIds } }] }) },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return res.json({ serverTime: new Date().toISOString(), mobileRecords: mobileRecords.map((record) => ({ id: record.clientId, kind: record.kind, objectId: record.objectId, payload: record.payload, updatedAt: record.updatedAt.toISOString() })), reviewers: reviewers.map((reviewer) => ({ id: reviewer.id, name: reviewer.fullName, objectIds: reviewer.roles.flatMap((role) => role.objectId ? [role.objectId] : []) })), objects: objects.map((object) => {
       const tasks = object.stages.flatMap((stage) => stage.sections.flatMap((section) => section.tasks.map((task) => ({
         id: task.id, objectId: object.id, stage: localized(stage.name, stage.nameUz), section: localized(section.name, section.nameUz), title: localized(task.title, task.titleUz), description: localized(task.description ?? '', task.descriptionUz),
         due: task.plannedEnd?.toISOString().slice(0, 10) ?? '', priority: task.priority,

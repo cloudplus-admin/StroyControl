@@ -11,6 +11,7 @@ import { adminRouter } from './modules/admin/router';
 import { auditRouter } from './modules/audit/router';
 import { uploadsRouter } from './modules/uploads/router';
 import { mobileRouter } from './modules/mobile/router';
+import { mobileRecordsRouter } from './modules/mobile/records';
 import { planningRouter } from './modules/planning/router';
 import { documentsRouter } from './modules/documents/router';
 import { notificationsRouter } from './modules/notifications/router';
@@ -55,6 +56,7 @@ export function createApp() {
   app.use('/api/audit', auditRouter);
   app.use('/api/uploads', uploadsRouter);
   app.use('/api/mobile', mobileRouter);
+  app.use('/api/mobile', mobileRecordsRouter);
   app.use('/api/planning', planningRouter);
   app.use('/api', documentsRouter);
   app.use('/api/notifications', notificationsRouter);
