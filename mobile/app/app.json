@@ -1,44 +1,55 @@
 {
   "expo": {
     "name": "StroyControl",
-    "slug": "stroycontrol-mobile",
-    "version": "1.0.0",
+    "slug": "stroycontrol",
+    "version": "1.0.73",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "ios": {
-      "bundleIdentifier": "uz.cloudplus.stroycontrol",
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSCameraUsageDescription": "Камера нужна для фотофиксации при закрытии задач на объекте.",
-        "NSLocationWhenInUseUsageDescription": "Геолокация нужна для геометки при закрытии задач на объекте."
-      }
-    },
     "android": {
       "package": "uz.cloudplus.stroycontrol",
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
-      "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
+      "versionCode": 86,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "permissions": [
+        "CAMERA",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "plugins": [
+      "./plugins/withAndroidReleaseSigning",
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Камера нужна для фотофиксации при закрытии задач на объекте."
+          "photosPermission": "Фото нужно для подтверждения выполненных работ",
+          "cameraPermission": "Камера нужна для фотоотчетов со стройплощадки"
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Геолокация нужна для геометки при закрытии задач на объекте."
+          "locationWhenInUsePermission": "Геолокация нужна для подтверждения нахождения на объекте"
+        }
+      ],
+      "expo-audio",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Камера нужна для сканирования QR инструмента"
+        }
+      ],
+      "expo-sharing",
+      "expo-asset",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "enablePngCrunchInReleaseBuilds": true
+          }
         }
       ]
     ]

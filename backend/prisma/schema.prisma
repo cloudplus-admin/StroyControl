@@ -16,6 +16,12 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
   users     User[]
   objects   Object[]
+  auditLogs AuditLog[]
+  idempotencyRecords IdempotencyRecord[]
+  uploads   FileUpload[]
+  documents ProjectDocument[]
+  workActs  WorkAct[]
+  mobileRecords MobileRecord[]
 
   @@map("companies")
 }
@@ -24,60 +30,158 @@ model Role {
   id   Int    @id @default(autoincrement())
   code String @unique
   name String
+  userRoles UserRole[]
 
   @@map("roles")
 }
 
 model User {
-  id                       String             @id @default(uuid())
-  companyId                String             @map("company_id")
-  company                  Company            @relation(fields: [companyId], references: [id])
-  email                    String             @unique
-  phone                    String?
-  fullName                 String             @map("full_name")
-  passwordHash             String             @map("password_hash")
-  locale                   String             @default("ru")
-  createdAt                DateTime           @default(now()) @map("created_at")
-  assignedTasks            Task[]
-  authoredPhotoReports     PhotoReport[]
-  reportedDefects          Defect[]
-  feedEvents               FeedEvent[]
-  feedReactions            FeedReaction[]
-  uploadedDocumentVersions DocumentVersion[]
-  raisedApprovals          CustomerApproval[] @relation("ApprovalRaisedBy")
-  respondedApprovals       CustomerApproval[] @relation("ApprovalRespondedBy")
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  company      Company  @relation(fields: [companyId], references: [id])
+  email        String   @unique
+  phone        String?
+  fullName     String   @map("full_name")
+  passwordHash String   @map("password_hash")
+  locale       String   @default("ru")
+  telegramChatId String? @map("telegram_chat_id")
+  pushToken      String? @map("push_token")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  assignedTasks        Task[]
+  reviewAssignments    Task[] @relation("TaskReviewer")
+  authoredPhotoReports PhotoReport[]
+  reportedDefects      Defect[]
+  assignedDefects      Defect[] @relation("DefectAssignee")
+  feedEvents           FeedEvent[]
+  feedReactions        FeedReaction[]
+  roles                UserRole[]
+  sessions             Session[]
+  auditLogs            AuditLog[]
+  createdDocuments     ProjectDocument[] @relation("DocumentCreator")
+  documentDecisions   DocumentApproval[]
+  createdWorkActs      WorkAct[] @relation("ActCreator")
+  signedWorkActs       WorkAct[] @relation("ActSigner")
+  notifications        Notification[]
 
   @@map("users")
 }
 
 model Object {
-  id                String             @id @default(uuid())
-  companyId         String             @map("company_id")
-  company           Company            @relation(fields: [companyId], references: [id])
-  name              String
-  address           String?
-  templateCode      String?            @map("template_code")
-  status            String             @default("active")
-  createdAt         DateTime           @default(now()) @map("created_at")
-  stages            Stage[]
-  photoReports      PhotoReport[]
-  defects           Defect[]
-  feedEvents        FeedEvent[]
-  documents         Document[]
-  paymentSchedules  PaymentSchedule[]
-  customerApprovals CustomerApproval[]
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  company      Company  @relation(fields: [companyId], references: [id])
+  name         String
+  nameUz       String?  @map("name_uz")
+  address      String?
+  addressUz    String?  @map("address_uz")
+  latitude     Float?
+  longitude    Float?
+  templateCode String?  @map("template_code")
+  status       String   @default("active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  stages       Stage[]
+  photoReports PhotoReport[]
+  defects      Defect[]
+  feedEvents   FeedEvent[]
+  userRoles    UserRole[]
+  documents    ProjectDocument[]
+  workActs     WorkAct[]
+  mobileRecords MobileRecord[]
 
   @@map("objects")
 }
 
+model UserRole {
+  id       String  @id @default(uuid())
+  userId   String  @map("user_id")
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId   Int     @map("role_id")
+  role     Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  objectId String? @map("object_id")
+  object   Object? @relation(fields: [objectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, objectId])
+  @@index([userId])
+  @@index([objectId])
+  @@map("user_roles")
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessTokenHash  String    @unique @map("access_token_hash")
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  accessExpiresAt  DateTime  @map("access_expires_at")
+  refreshExpiresAt DateTime  @map("refresh_expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  companyId  String   @map("company_id")
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  actorId    String?  @map("actor_id")
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  payload    Json
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([companyId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model IdempotencyRecord {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  key          String
+  operation    String
+  requestHash  String   @map("request_hash")
+  responseBody Json?    @map("response_body")
+  statusCode   Int?     @map("status_code")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([companyId, key])
+  @@index([createdAt])
+  @@map("idempotency_records")
+}
+
+model FileUpload {
+  id           String   @id @default(uuid())
+  companyId    String   @map("company_id")
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  uploaderId   String?  @map("uploader_id")
+  taskId       String?  @map("task_id")
+  idempotencyKey String @map("idempotency_key")
+  storageKey   String   @unique @map("storage_key")
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  sizeBytes    Int      @map("size_bytes")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([companyId, createdAt])
+  @@index([taskId])
+  @@unique([companyId, idempotencyKey])
+  @@map("file_uploads")
+}
+
 model Stage {
-  id                String             @id @default(uuid())
-  objectId          String             @map("object_id")
-  object            Object             @relation(fields: [objectId], references: [id], onDelete: Cascade)
-  name              String
-  sortOrder         Int                @default(0) @map("sort_order")
-  sections          WorkSection[]
-  customerApprovals CustomerApproval[]
+  id        String        @id @default(uuid())
+  objectId  String        @map("object_id")
+  object    Object        @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  name      String
+  nameUz    String?       @map("name_uz")
+  sortOrder Int           @default(0) @map("sort_order")
+  sections  WorkSection[]
 
   @@index([objectId])
   @@map("stages")
@@ -88,6 +192,7 @@ model WorkSection {
   stageId   String @map("stage_id")
   stage     Stage  @relation(fields: [stageId], references: [id], onDelete: Cascade)
   name      String
+  nameUz    String? @map("name_uz")
   sortOrder Int    @default(0) @map("sort_order")
   tasks     Task[]
 
@@ -96,40 +201,50 @@ model WorkSection {
 }
 
 model Task {
-  id                String              @id @default(uuid())
-  workSectionId     String              @map("work_section_id")
-  workSection       WorkSection         @relation(fields: [workSectionId], references: [id], onDelete: Cascade)
-  parentTaskId      String?             @map("parent_task_id")
-  assigneeId        String?             @map("assignee_id")
-  assignee          User?               @relation(fields: [assigneeId], references: [id])
-  title             String
-  description       String?
-  status            String              @default("open")
-  priority          String              @default("normal")
-  tags              String[]            @default([])
-  plannedStart      DateTime?           @map("planned_start")
-  plannedEnd        DateTime?           @map("planned_end")
-  baselineStart     DateTime?           @map("baseline_start")
-  baselineEnd       DateTime?           @map("baseline_end")
-  actualStart       DateTime?           @map("actual_start")
-  actualEnd         DateTime?           @map("actual_end")
-  dependsOn         String[]            @default([]) @map("depends_on")
-  slaHours          Int?                @map("sla_hours")
-  isRecurring       Boolean             @default(false) @map("is_recurring")
-  recurrenceRule    String?             @map("recurrence_rule")
-  closurePhotoUrl   String?             @map("closure_photo_url")
-  closureGeoLat     Float?              @map("closure_geo_lat")
-  closureGeoLng     Float?              @map("closure_geo_lng")
-  closedAt          DateTime?           @map("closed_at")
-  escalatedAt       DateTime?           @map("escalated_at")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  checklist         TaskChecklistItem[]
-  photoReports      PhotoReport[]
-  defects           Defect[]
-  customerApprovals CustomerApproval[]
+  id               String      @id @default(uuid())
+  workSectionId    String      @map("work_section_id")
+  workSection      WorkSection @relation(fields: [workSectionId], references: [id], onDelete: Cascade)
+  parentTaskId     String?     @map("parent_task_id")
+  assigneeId       String?     @map("assignee_id")
+  assignee         User?       @relation(fields: [assigneeId], references: [id])
+  title            String
+  titleUz          String?     @map("title_uz")
+  description      String?
+  descriptionUz    String?     @map("description_uz")
+  status           String      @default("open")
+  priority         String      @default("normal")
+  tags             String[]    @default([])
+  plannedStart     DateTime?   @map("planned_start")
+  plannedEnd       DateTime?   @map("planned_end")
+  baselineStart    DateTime?   @map("baseline_start")
+  baselineEnd      DateTime?   @map("baseline_end")
+  actualStart      DateTime?   @map("actual_start")
+  actualEnd        DateTime?   @map("actual_end")
+  dependsOn        String[]    @default([]) @map("depends_on")
+  slaHours         Int?        @map("sla_hours")
+  isRecurring      Boolean     @default(false) @map("is_recurring")
+  recurrenceRule   String?     @map("recurrence_rule")
+  closurePhotoUrl  String?     @map("closure_photo_url")
+  closurePhotos    Json        @default("[]") @map("closure_photos")
+  closureGeoLat    Float?      @map("closure_geo_lat")
+  closureGeoLng    Float?      @map("closure_geo_lng")
+  closedAt         DateTime?   @map("closed_at")
+  submittedAt      DateTime?   @map("submitted_at")
+  reviewedAt       DateTime?   @map("reviewed_at")
+  reviewedById     String?     @map("reviewed_by_id")
+  reviewerId       String?     @map("reviewer_id")
+  reviewer         User?       @relation("TaskReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewNote       String?     @map("review_note")
+  escalatedAt      DateTime?   @map("escalated_at")
+  escalationLevel  Int         @default(0) @map("escalation_level")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  checklist        TaskChecklistItem[]
+  photoReports     PhotoReport[]
+  defects          Defect[]
 
   @@index([workSectionId])
   @@index([assigneeId])
+  @@index([reviewerId])
   @@map("tasks")
 }
 
@@ -138,6 +253,7 @@ model TaskChecklistItem {
   taskId String  @map("task_id")
   task   Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
   label  String
+  labelUz String? @map("label_uz")
   isDone Boolean @default(false) @map("is_done")
 
   @@index([taskId])
@@ -145,60 +261,70 @@ model TaskChecklistItem {
 }
 
 model PhotoReport {
-  id                 String    @id @default(uuid())
-  objectId           String    @map("object_id")
-  object             Object    @relation(fields: [objectId], references: [id], onDelete: Cascade)
-  taskId             String?   @map("task_id")
-  task               Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  authorId           String    @map("author_id")
-  author             User      @relation(fields: [authorId], references: [id])
-  shootingPoint      String?   @map("shooting_point")
-  kind               String    @default("progress") // progress | before | after | hidden_works
-  fileUrl            String    @map("file_url")
-  geoLat             Float?    @map("geo_lat")
-  geoLng             Float?    @map("geo_lng")
-  inspectorSignature String?   @map("inspector_signature")
-  documentId         String?   @map("document_id") // привязка к акту выполненных работ (модуль «Документооборот»)
-  document           Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  createdAt          DateTime  @default(now()) @map("created_at")
+  id                 String   @id @default(uuid())
+  objectId           String   @map("object_id")
+  object             Object   @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  taskId             String?  @map("task_id")
+  task               Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  authorId           String   @map("author_id")
+  author             User     @relation(fields: [authorId], references: [id])
+  shootingPoint      String?  @map("shooting_point")
+  kind               String   @default("progress") // progress | before | after | hidden_works
+  fileUrl            String   @map("file_url")
+  requiredAngles     String[] @default([]) @map("required_angles")
+  photos             Json     @default("[]")
+  status             String   @default("draft") // draft | review | accepted | rejected
+  geoLat             Float?   @map("geo_lat")
+  geoLng             Float?   @map("geo_lng")
+  inspectorSignature String?  @map("inspector_signature")
+  inspectorNote      String?  @map("inspector_note")
+  reviewedAt         DateTime? @map("reviewed_at")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   @@index([objectId])
   @@index([taskId])
-  @@index([documentId])
   @@map("photo_reports")
 }
 
 model Defect {
-  id          String   @id @default(uuid())
-  objectId    String   @map("object_id")
-  object      Object   @relation(fields: [objectId], references: [id], onDelete: Cascade)
-  taskId      String?  @map("task_id")
-  task        Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  reportedBy  String   @map("reported_by")
-  reporter    User     @relation(fields: [reportedBy], references: [id])
-  status      String   @default("open") // open | in_progress | verified | closed
+  id         String   @id @default(uuid())
+  objectId   String   @map("object_id")
+  object     Object   @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  taskId     String?  @map("task_id")
+  task       Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  reportedBy String   @map("reported_by")
+  reporter   User     @relation(fields: [reportedBy], references: [id])
+  assignedToId String? @map("assigned_to_id")
+  assignedTo   User?   @relation("DefectAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  status     String   @default("open") // open | in_progress | review | closed
   description String
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  beforePhotos Json     @default("[]") @map("before_photos")
+  afterPhotos  Json     @default("[]") @map("after_photos")
+  dueAt        DateTime? @map("due_at")
+  reviewNote   String?   @map("review_note")
+  resolvedAt   DateTime? @map("resolved_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@index([objectId])
+  @@index([assignedToId])
   @@map("defects")
 }
 
 model FeedEvent {
-  id               String         @id @default(uuid())
-  objectId         String         @map("object_id")
-  object           Object         @relation(fields: [objectId], references: [id], onDelete: Cascade)
-  authorId         String?        @map("author_id")
-  author           User?          @relation(fields: [authorId], references: [id])
-  kind             String         @default("message") // message | status_change | acceptance | file
-  body             String?
-  mentionedUserIds String[]       @default([]) @map("mentioned_user_ids")
-  parentEventId    String?        @map("parent_event_id")
-  parentEvent      FeedEvent?     @relation("FeedThread", fields: [parentEventId], references: [id], onDelete: SetNull)
-  replies          FeedEvent[]    @relation("FeedThread")
-  reactions        FeedReaction[]
-  createdAt        DateTime       @default(now()) @map("created_at")
+  id              String         @id @default(uuid())
+  objectId        String         @map("object_id")
+  object          Object         @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  authorId        String?        @map("author_id")
+  author          User?          @relation(fields: [authorId], references: [id])
+  kind            String         @default("message") // message | status_change | acceptance | file
+  body            String?
+  mentionedUserIds String[]      @default([]) @map("mentioned_user_ids")
+  parentEventId   String?        @map("parent_event_id")
+  parentEvent     FeedEvent?     @relation("FeedThread", fields: [parentEventId], references: [id], onDelete: SetNull)
+  replies         FeedEvent[]    @relation("FeedThread")
+  reactions       FeedReaction[]
+  createdAt       DateTime       @default(now()) @map("created_at")
 
   @@index([objectId, createdAt])
   @@index([parentEventId])
@@ -218,87 +344,100 @@ model FeedReaction {
   @@map("feed_reactions")
 }
 
-// Документооборот: хранилище документов с версионностью (чертежи, сметы,
-// договоры, акты, исполнительная документация). Реальная загрузка файлов (S3)
-// не реализована — API принимает уже готовый fileUrl, как и в photocontrol.
-model Document {
-  id           String            @id @default(uuid())
-  objectId     String            @map("object_id")
-  object       Object            @relation(fields: [objectId], references: [id], onDelete: Cascade)
-  title        String
-  docType      String            @map("doc_type") // drawing | estimate | contract | act | as_built | certificate
-  templateCode String?           @map("template_code") // код шаблона акта/справки под формы РУз (раздел 9 ТЗ), без генерации PDF
-  createdAt    DateTime          @default(now()) @map("created_at")
-  versions     DocumentVersion[]
-  photoReports PhotoReport[]
+model ProjectDocument {
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  objectId    String   @map("object_id")
+  object      Object   @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  createdById String   @map("created_by_id")
+  createdBy   User     @relation("DocumentCreator", fields: [createdById], references: [id])
+  title       String
+  kind        String
+  version     Int      @default(1)
+  fileUrl     String   @map("file_url")
+  status      String   @default("draft")
+  createdAt   DateTime @default(now()) @map("created_at")
+  approvals   DocumentApproval[]
 
-  @@index([objectId])
-  @@map("documents")
+  @@index([companyId, objectId, createdAt])
+  @@map("project_documents")
 }
 
-// Версии документа — контроль версий и история изменений (кто и когда менял).
-// Этап 2: э-подпись и маршруты согласования версий не реализованы.
-model DocumentVersion {
-  id           String   @id @default(uuid())
-  documentId   String   @map("document_id")
-  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  versionNo    Int      @map("version_no")
-  fileUrl      String   @map("file_url")
-  uploadedById String   @map("uploaded_by")
-  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
-  createdAt    DateTime @default(now()) @map("created_at")
+model DocumentApproval {
+  id         String          @id @default(uuid())
+  documentId String          @map("document_id")
+  document   ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  actorId    String          @map("actor_id")
+  actor      User            @relation(fields: [actorId], references: [id])
+  decision   String
+  note       String?
+  createdAt  DateTime        @default(now()) @map("created_at")
 
-  @@unique([documentId, versionNo])
-  @@index([documentId])
-  @@map("document_versions")
+  @@unique([documentId, actorId])
+  @@map("document_approvals")
 }
 
-// Кабинет заказчика, Этап 1: график оплат по объекту. Лёгкая заглушка —
-// планируемые платежи с датой и статусом. Полноценный модуль «Финансы и
-// бюджет объекта» (P&L, план/факт, S-кривая, KPI) — Этап 2 (раздел 10 ТЗ),
-// здесь не реализуется. Суммы хранятся как Float (как geo-координаты в
-// photocontrol) — для реального финансового учёта в Этапе 2 потребуется
-// Decimal/NUMERIC.
-model PaymentSchedule {
+model WorkAct {
   id          String    @id @default(uuid())
+  companyId   String    @map("company_id")
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   objectId    String    @map("object_id")
   object      Object    @relation(fields: [objectId], references: [id], onDelete: Cascade)
-  description String
-  amount      Float
-  dueDate     DateTime  @map("due_date")
-  status      String    @default("pending") // pending | paid | overdue
-  paidAt      DateTime? @map("paid_at")
+  createdById String    @map("created_by_id")
+  createdBy   User      @relation("ActCreator", fields: [createdById], references: [id])
+  signedById  String?   @map("signed_by_id")
+  signedBy    User?     @relation("ActSigner", fields: [signedById], references: [id])
+  template    String
+  number      String
+  title       String
+  amount      Decimal   @db.Decimal(14, 2)
+  status      String    @default("draft")
+  pdfUrl      String?   @map("pdf_url")
+  signedAt    DateTime? @map("signed_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  @@index([objectId])
-  @@map("payment_schedules")
+  @@unique([companyId, number])
+  @@index([companyId, objectId, createdAt])
+  @@map("work_acts")
 }
 
-// Кабинет заказчика, Этап 1: согласования и замечания заказчика, зафиксированные
-// прямо в системе (вместо звонков менеджеру). Привязка к объекту обязательна,
-// к этапу/задаче — опционально. Реального клиентского логина/JWT нет — как и
-// везде в системе, доступ временно ограничен заголовком x-company-id.
-model CustomerApproval {
-  id              String    @id @default(uuid())
-  objectId        String    @map("object_id")
-  object          Object    @relation(fields: [objectId], references: [id], onDelete: Cascade)
-  stageId         String?   @map("stage_id")
-  stage           Stage?    @relation(fields: [stageId], references: [id], onDelete: SetNull)
-  taskId          String?   @map("task_id")
-  task            Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  title           String
-  comment         String?
-  status          String    @default("pending") // pending | approved | changes_requested
-  raisedById      String    @map("raised_by")
-  raisedBy        User      @relation("ApprovalRaisedBy", fields: [raisedById], references: [id])
-  responseComment String?   @map("response_comment")
-  respondedById   String?   @map("responded_by")
-  respondedBy     User?     @relation("ApprovalRespondedBy", fields: [respondedById], references: [id])
-  respondedAt     DateTime? @map("responded_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
+model Notification {
+  id         String    @id @default(uuid())
+  companyId  String    @map("company_id")
+  userId     String    @map("user_id")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  objectId   String?   @map("object_id")
+  kind       String
+  title      String
+  body       String
+  entityType String?   @map("entity_type")
+  entityId   String?   @map("entity_id")
+  readAt     DateTime? @map("read_at")
+  deliveryStatus String @default("pending") @map("delivery_status")
+  deliveryAttempts Int @default(0) @map("delivery_attempts")
+  deliveredAt DateTime? @map("delivered_at")
+  deliveryError String? @map("delivery_error")
+  createdAt  DateTime  @default(now()) @map("created_at")
 
-  @@index([objectId])
-  @@index([stageId])
-  @@index([taskId])
-  @@map("customer_approvals")
+  @@index([companyId, userId, readAt, createdAt])
+  @@index([deliveryStatus, createdAt])
+  @@map("notifications")
+}
+
+model MobileRecord {
+  id        String   @id @default(uuid())
+  companyId String   @map("company_id")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  objectId  String?  @map("object_id")
+  object    Object?  @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  clientId  String   @map("client_id")
+  kind      String
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([companyId, kind, clientId])
+  @@index([companyId, objectId, kind, updatedAt])
+  @@map("mobile_records")
 }

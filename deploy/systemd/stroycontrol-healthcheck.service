@@ -1,0 +1,14 @@
+[Unit]
+Description=StroyControl production health check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=stroycontrol
+Group=stroycontrol
+WorkingDirectory=/opt/stroycontrol/backend
+EnvironmentFile=-/etc/stroycontrol/monitoring.env
+ExecStart=/opt/stroycontrol/backend/scripts/healthcheck.sh
+NoNewPrivileges=true
+PrivateTmp=true

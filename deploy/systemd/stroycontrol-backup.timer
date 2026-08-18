@@ -1,0 +1,11 @@
+[Unit]
+Description=Create a daily StroyControl backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=stroycontrol-backup.service
+
+[Install]
+WantedBy=timers.target

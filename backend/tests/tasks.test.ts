@@ -29,6 +29,17 @@ afterAll(async () => {
 });
 
 describe('Task checklist and closure', () => {
+  it('edits planning fields and clears a deadline', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const taskRes = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id)
+      .send({ title: 'Исходная задача', plannedEnd: '2026-08-20' });
+    const assignee = await prisma.user.create({ data: { companyId: company.id, email: 'worker@example.com', passwordHash: 'hash', fullName: 'Рабочий' } });
+    const updated = await request(app).patch(`/api/tasks/${taskRes.body.id}`).set('x-company-id', company.id)
+      .send({ title: 'Обновленная задача', description: 'Проверить по чертежу', priority: 'high', assigneeId: assignee.id, plannedEnd: null });
+    expect(updated.status).toBe(200);
+    expect(updated.body).toMatchObject({ title: 'Обновленная задача', description: 'Проверить по чертежу', priority: 'high', assigneeId: assignee.id, plannedEnd: null });
+  });
+
   it('adds and toggles checklist items', async () => {
     const { company, sectionId } = await seedCompanyWithSection();
     const taskRes = await request(app)
@@ -65,21 +76,94 @@ describe('Task checklist and closure', () => {
     expect(closeRes.status).toBe(400);
   });
 
-  it('closes a task with photo and geotag, marking it done', async () => {
+  it('blocks closure until dependencies and required checklist are complete', async () => {
     const { company, sectionId } = await seedCompanyWithSection();
+    const dependency = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Подготовка' });
+    const task = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Монтаж', dependsOn: [dependency.body.id] });
+    const checklist = await request(app).post(`/api/tasks/${task.body.id}/checklist`).set('x-company-id', company.id).send({ label: 'Проверить допуск' });
+    const close = (key: string) => request(app).post(`/api/tasks/${task.body.id}/close`).set('x-company-id', company.id).set('idempotency-key', key).send({ photoUrl: 'https://example.com/result.jpg', geoLat: 41.3, geoLng: 69.2 });
+
+    expect((await close('blocked-checklist')).body.error).toContain('checklist');
+    await request(app).patch(`/api/tasks/${task.body.id}/checklist/${checklist.body.id}`).set('x-company-id', company.id).send({ isDone: true });
+    expect((await close('blocked-dependency')).body.error).toContain('dependencies');
+    await prisma.task.update({ where: { id: dependency.body.id }, data: { status: 'done' } });
+    expect((await close('unblocked-task')).status).toBe(200);
+  });
+
+  it('rejects self and cross-object dependencies during editing', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const task = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Основная' });
+    const self = await request(app).patch(`/api/tasks/${task.body.id}`).set('x-company-id', company.id).send({ dependsOn: [task.body.id] });
+    expect(self.status).toBe(400);
+    expect(self.body.error).toBe('invalid_dependencies');
+  });
+
+  it('submits a task with multiple photos and geotag for review', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const reviewer = await prisma.user.create({ data: { companyId: company.id, email: 'reviewer@example.com', passwordHash: 'hash', fullName: 'Проверяющий' } });
     const taskRes = await request(app)
       .post(`/api/objects/sections/${sectionId}/tasks`)
       .set('x-company-id', company.id)
       .send({ title: 'Задача с площадки' });
+    await prisma.task.update({ where: { id: taskRes.body.id }, data: { reviewerId: reviewer.id } });
 
     const closeRes = await request(app)
       .post(`/api/tasks/${taskRes.body.id}/close`)
       .set('x-company-id', company.id)
-      .send({ photoUrl: 'https://example.com/photo.jpg', geoLat: 41.3, geoLng: 69.2 });
+      .set('idempotency-key', 'close-task-from-site-1')
+      .send({ photoUrls: ['https://example.com/photo-1.jpg', 'https://example.com/photo-2.jpg'], geoLat: 41.3, geoLng: 69.2 });
 
     expect(closeRes.status).toBe(200);
+    expect(closeRes.body.status).toBe('review');
+    expect(closeRes.body.closurePhotoUrl).toBe('https://example.com/photo-1.jpg');
+    expect(closeRes.body.closurePhotos).toEqual(['https://example.com/photo-1.jpg', 'https://example.com/photo-2.jpg']);
+  });
+
+  it('completes a task immediately when no reviewer is assigned', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const taskRes = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Без приемки' });
+    const closeRes = await request(app).post(`/api/tasks/${taskRes.body.id}/close`).set('x-company-id', company.id).set('idempotency-key', 'close-without-reviewer').send({ photoUrl: 'https://example.com/done.jpg', geoLat: 41.3, geoLng: 69.2 });
+    expect(closeRes.status).toBe(200);
     expect(closeRes.body.status).toBe('done');
-    expect(closeRes.body.closurePhotoUrl).toBe('https://example.com/photo.jpg');
+    expect(closeRes.body.closedAt).toBeTruthy();
+  });
+
+  it('replays the same offline close operation without duplicate side effects', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const taskRes = await request(app)
+      .post(`/api/objects/sections/${sectionId}/tasks`)
+      .set('x-company-id', company.id)
+      .send({ title: 'Офлайн-задача' });
+    const payload = { photoUrl: 'https://example.com/offline.jpg', geoLat: 41.31, geoLng: 69.21 };
+    const sendClose = () => request(app)
+      .post(`/api/tasks/${taskRes.body.id}/close`)
+      .set('x-company-id', company.id)
+      .set('idempotency-key', 'device-operation-123')
+      .send(payload);
+
+    const first = await sendClose();
+    const replay = await sendClose();
+    expect(first.status).toBe(200);
+    expect(first.headers['idempotency-replayed']).toBe('false');
+    expect(replay.status).toBe(200);
+    expect(replay.headers['idempotency-replayed']).toBe('true');
+    expect(replay.body.id).toBe(first.body.id);
+    expect(await prisma.idempotencyRecord.count()).toBe(1);
+    expect(await prisma.feedEvent.count({ where: { body: { contains: 'Офлайн-задача' } } })).toBe(1);
+  });
+
+  it('rejects reuse of an idempotency key with different data', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const taskRes = await request(app)
+      .post(`/api/objects/sections/${sectionId}/tasks`)
+      .set('x-company-id', company.id)
+      .send({ title: 'Конфликт ключа' });
+    const endpoint = `/api/tasks/${taskRes.body.id}/close`;
+    await request(app).post(endpoint).set('x-company-id', company.id).set('idempotency-key', 'same-key')
+      .send({ photoUrl: 'https://example.com/a.jpg', geoLat: 41.3, geoLng: 69.2 });
+    const conflict = await request(app).post(endpoint).set('x-company-id', company.id).set('idempotency-key', 'same-key')
+      .send({ photoUrl: 'https://example.com/b.jpg', geoLat: 41.4, geoLng: 69.3 });
+    expect(conflict.status).toBe(409);
   });
 });
 
@@ -117,6 +201,16 @@ describe('SLA sweep', () => {
     const sweepRes = await request(app).post('/api/tasks/sla-sweep').set('x-company-id', companyB.id);
     expect(sweepRes.body.escalated).toEqual([]);
   });
+
+  it('creates an in-app delivery job and records the escalation level', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const assignee = await prisma.user.create({ data: { companyId: company.id, email: 'sla@example.com', passwordHash: 'hash', fullName: 'Исполнитель' } });
+    const task = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id)
+      .send({ title: 'SLA уведомление', assigneeId: assignee.id, plannedEnd: new Date(Date.now() - 86400000).toISOString() });
+    const sweep = await request(app).post('/api/tasks/sla-sweep').set('x-company-id', company.id);
+    expect(sweep.body.escalated).toContainEqual(expect.objectContaining({ id: task.body.id, level: 1 }));
+    expect(await prisma.notification.findFirst({ where: { userId: assignee.id, entityId: task.body.id } })).toMatchObject({ deliveryStatus: 'pending' });
+  });
 });
 
 describe('Recurring tasks', () => {
@@ -136,5 +230,16 @@ describe('Recurring tasks', () => {
 
     const secondSweep = await request(app).post('/api/tasks/recurring-sweep').set('x-company-id', company.id);
     expect(secondSweep.body.created.length).toBe(0);
+  });
+
+  it('supports selected weekdays and skips non-matching weekdays', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const template = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Недельный обход' });
+    const today = new Date().getUTCDay();
+    await prisma.task.update({ where: { id: template.body.id }, data: { isRecurring: true, recurrenceRule: `weekly:${today}` } });
+    expect((await request(app).post('/api/tasks/recurring-sweep').set('x-company-id', company.id)).body.created).toHaveLength(1);
+    await prisma.task.update({ where: { id: template.body.id }, data: { recurrenceRule: `weekly:${(today + 1) % 7}` } });
+    await prisma.task.deleteMany({ where: { parentTaskId: template.body.id } });
+    expect((await request(app).post('/api/tasks/recurring-sweep').set('x-company-id', company.id)).body.created).toHaveLength(0);
   });
 });

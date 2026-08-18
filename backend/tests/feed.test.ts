@@ -116,12 +116,12 @@ describe('Cross-module system events', () => {
     const defect = await request(app)
       .post(`/api/objects/${object.id}/defects`)
       .set('x-company-id', company.id)
-      .send({ reportedBy: author.id, description: 'Неровность кладки' });
+      .send({ reportedBy: author.id, assignedToId: author.id, description: 'Неровность кладки', beforePhotos: ['https://example.com/before.jpg'] });
 
     await request(app)
       .patch(`/api/defects/${defect.body.id}`)
       .set('x-company-id', company.id)
-      .send({ status: 'verified' });
+      .send({ status: 'in_progress' });
 
     const feedRes = await request(app).get(`/api/objects/${object.id}/feed`).set('x-company-id', company.id);
     const systemEvent = feedRes.body.find((e: { kind: string }) => e.kind === 'status_change');

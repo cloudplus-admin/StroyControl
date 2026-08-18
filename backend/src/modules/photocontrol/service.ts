@@ -16,14 +16,33 @@ export async function createPhotoReport(
     shootingPoint?: string;
     kind: string;
     fileUrl: string;
+    requiredAngles?: string[];
+    photos?: { angle: string; uri: string }[];
+    status?: string;
     geoLat?: number;
     geoLng?: number;
-    inspectorSignature?: string;
   },
 ) {
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!object) return null;
+  const author = await prisma.user.findFirst({ where: { id: input.authorId, companyId } });
+  if (!author) return null;
+  if (input.taskId) {
+    const task = await prisma.task.findFirst({ where: { id: input.taskId, workSection: { stage: { objectId } } } });
+    if (!task) return null;
+  }
+  const suppliedAngles = new Set((input.photos ?? []).map((photo) => photo.angle));
+  if ((input.requiredAngles ?? []).some((angle) => !suppliedAngles.has(angle))) return 'incomplete_angles' as const;
   return prisma.photoReport.create({ data: { objectId, ...input } });
+}
+
+export async function reviewPhotoReport(companyId: string, reportId: string, input: { decision: 'accepted' | 'rejected'; note: string }) {
+  const report = await prisma.photoReport.findFirst({ where: { id: reportId, object: { companyId } } });
+  if (!report) return null;
+  return prisma.photoReport.update({
+    where: { id: reportId },
+    data: { status: input.decision, inspectorNote: input.note || null, reviewedAt: new Date() },
+  });
 }
 
 /**
@@ -53,35 +72,36 @@ export async function listShootingPoints(companyId: string, objectId: string) {
 export async function listDefects(companyId: string, objectId: string) {
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!object) return null;
-  return prisma.defect.findMany({ where: { objectId }, orderBy: { createdAt: 'desc' } });
+  return prisma.defect.findMany({ where: { objectId }, include: { assignedTo: { select: { id: true, fullName: true } } }, orderBy: { createdAt: 'desc' } });
 }
 
 export async function createDefect(
   companyId: string,
   objectId: string,
-  input: { taskId?: string; reportedBy: string; description: string },
+  input: { taskId?: string; reportedBy: string; assignedToId: string; description: string; beforePhotos: string[]; dueAt?: Date },
 ) {
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!object) return null;
+  const reporter = await prisma.user.findFirst({ where: { id: input.reportedBy, companyId } });
+  if (!reporter) return null;
+  const assignee = await prisma.user.findFirst({ where: { id: input.assignedToId, companyId } });
+  if (!assignee) return null;
+  if (input.taskId) {
+    const task = await prisma.task.findFirst({ where: { id: input.taskId, workSection: { stage: { objectId } } } });
+    if (!task) return null;
+  }
   return prisma.defect.create({ data: { objectId, ...input } });
 }
 
-/**
- * Привязка фотофиксации к акту выполненных работ (документ типа `act`,
- * модуль «Документооборот», формы РУз раздел 6 ТЗ).
- */
-export async function linkPhotoReportToDocument(companyId: string, photoReportId: string, documentId: string) {
-  const photoReport = await prisma.photoReport.findFirst({ where: { id: photoReportId, object: { companyId } } });
-  if (!photoReport) return null;
-  const document = await prisma.document.findFirst({ where: { id: documentId, objectId: photoReport.objectId } });
-  if (!document) return null;
-  return prisma.photoReport.update({ where: { id: photoReportId }, data: { documentId } });
-}
-
-export async function updateDefectStatus(companyId: string, defectId: string, status: string) {
+export async function updateDefectStatus(companyId: string, defectId: string, status: string, afterPhotos?: string[], note?: string) {
   const defect = await prisma.defect.findFirst({ where: { id: defectId, object: { companyId } } });
   if (!defect) return null;
-  const updated = await prisma.defect.update({ where: { id: defectId }, data: { status } });
+  const allowed: Record<string, string[]> = { open: ['in_progress'], in_progress: ['review'], review: ['closed', 'in_progress'], closed: [] };
+  if (!allowed[defect.status]?.includes(status)) return 'invalid_transition' as const;
+  const existingAfter = Array.isArray(defect.afterPhotos) ? defect.afterPhotos : [];
+  if (status === 'review' && !(afterPhotos?.length || existingAfter.length)) return 'after_photos_required' as const;
+  if (defect.status === 'review' && status === 'in_progress' && !note?.trim()) return 'rejection_note_required' as const;
+  const updated = await prisma.defect.update({ where: { id: defectId }, data: { status, ...(afterPhotos ? { afterPhotos } : {}), reviewNote: status === 'in_progress' ? note?.trim() || null : null, resolvedAt: status === 'closed' ? new Date() : null } });
   await createSystemEvent(
     defect.objectId,
     'status_change',

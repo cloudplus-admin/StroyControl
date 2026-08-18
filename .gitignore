@@ -1,4 +1,5 @@
 node_modules/
+.expo/
 dist/
 build/
 .env
@@ -6,4 +7,12 @@ build/
 *.log
 .DS_Store
 *.apk
+*.jks
+*.keystore
+mobile/app/android/
+mobile/app/build-artifacts/
 *.tsbuildinfo
+backend/uploads/
+backups/
+web/test-results/
+web/playwright-report/

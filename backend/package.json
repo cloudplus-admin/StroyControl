@@ -6,11 +6,13 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "maintenance": "node dist/maintenance.js",
     "lint": "eslint src --ext .ts",
     "pretest": "node --env-file=.env.test node_modules/.bin/prisma migrate deploy",
     "test": "node --env-file=.env.test node_modules/.bin/vitest run",
     "prisma:generate": "prisma generate",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:seed-apk-demo": "tsx prisma/seed-apk-demo.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",

@@ -1,0 +1,17 @@
+[Unit]
+Description=Test restoration of the latest StroyControl backup
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=stroycontrol
+Group=stroycontrol
+WorkingDirectory=/opt/stroycontrol/backend
+EnvironmentFile=/etc/stroycontrol/backend.env
+Environment=BACKUP_DIR=/var/backups/stroycontrol
+Environment=RESTORE_DATABASE=stroycontrol_restore_weekly
+ExecStart=/opt/stroycontrol/backend/scripts/restore-latest-backup-test.sh
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
