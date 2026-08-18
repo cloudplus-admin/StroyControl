@@ -13,7 +13,7 @@ export const roles: { id: Role; ru: string; uz: string; en: string; scope: Recor
   { id: 'admin', ru: 'Администратор', uz: 'Administrator', en: 'Administrator', scope: { ru: 'Пользователи и права', uz: 'Foydalanuvchilar va ruxsatlar', en: 'Users and permissions' } }
 ];
 
-export type Project = { id: string; name: string; address: string; progress: number; plan: number; deadline: string; forecast: string; risk: 'low' | 'medium' | 'high'; tasksOpen: number; defectsOpen: number };
+export type Project = { id: string; name: string; address: string; latitude?: number; longitude?: number; progress: number; plan: number; deadline: string; forecast: string; risk: 'low' | 'medium' | 'high'; tasksOpen: number; defectsOpen: number };
 export const projects: Project[] = [
   { id: 'p1', name: 'ЖК Bogishamol Riviera', address: 'Ташкент, Юнусабад', progress: 52, plan: 58, deadline: '16.11.2026', forecast: '30.11.2026', risk: 'high', tasksOpen: 18, defectsOpen: 4 },
   { id: 'p2', name: 'БЦ Sergeli Business Park', address: 'Ташкент, Сергели', progress: 18, plan: 17, deadline: '28.02.2027', forecast: '28.02.2027', risk: 'low', tasksOpen: 9, defectsOpen: 1 },
@@ -172,7 +172,7 @@ export function closeTask(data: AppData, taskId: string, photoUris: string[] | s
   const photos = (Array.isArray(photoUris) ? photoUris : [photoUris]).filter(Boolean).slice(0, 10);
   if (!photos.length) return data;
   const tasks = data.tasks.map((task) => task.id !== taskId ? task : {
-    ...task, status: 'review' as const, photoUri: photos[0], photoUris: photos, latitude, longitude,
+    ...task, status: task.reviewerId ? 'review' as const : 'done' as const, photoUri: photos[0], photoUris: photos, latitude, longitude,
     checklist: task.checklist.map((item) => ({ ...item, done: true }))
   });
   const next = enqueue({ ...data, tasks }, 'task.closed', taskId, now);
@@ -330,7 +330,7 @@ export function advanceSafetyViolation(data: AppData, id: string, now = new Date
 }
 
 export function createWorkAct(data: AppData, value: Omit<WorkAct, 'id' | 'createdAt' | 'pdfUri'>, now = new Date().toISOString()): AppData {
-  if (!value.projectId || !value.number.trim() || !value.title.trim() || !value.contractor.trim() || !value.customer.trim() || !value.date || !Number.isFinite(value.amount) || value.amount < 0 || value.signature.length < 3) return data;
+  if (!value.projectId || !value.number.trim() || !value.title.trim() || !value.contractor.trim() || !value.customer.trim() || !value.date || !Number.isFinite(value.amount) || value.amount < 0) return data;
   const id = `act-${Date.parse(now)}`;
   const act: WorkAct = { ...value, id, number: value.number.trim(), title: value.title.trim(), contractor: value.contractor.trim(), customer: value.customer.trim(), notes: value.notes.trim(), createdAt: now };
   return enqueue({ ...data, acts: [act, ...data.acts] }, 'act.created', id, now);

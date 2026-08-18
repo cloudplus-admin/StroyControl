@@ -56,7 +56,7 @@ export async function listObjects(companyId: string) {
 
 export async function createObject(
   companyId: string,
-  input: { name: string; nameUz?: string; address?: string; addressUz?: string; templateCode?: ObjectTemplateCode },
+  input: { name: string; nameUz?: string; address?: string; addressUz?: string; latitude?: number; longitude?: number; templateCode?: ObjectTemplateCode },
 ) {
   return prisma.object.create({
     data: {
@@ -65,6 +65,8 @@ export async function createObject(
       nameUz: input.nameUz,
       address: input.address,
       addressUz: input.addressUz,
+      latitude: input.latitude,
+      longitude: input.longitude,
       templateCode: input.templateCode,
       stages: input.templateCode
         ? {
@@ -105,7 +107,7 @@ export async function getObject(companyId: string, objectId: string) {
 export async function updateObject(
   companyId: string,
   objectId: string,
-  input: { name?: string; nameUz?: string; address?: string; addressUz?: string; status?: string },
+  input: { name?: string; nameUz?: string; address?: string; addressUz?: string; latitude?: number | null; longitude?: number | null; status?: string },
 ) {
   const existing = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!existing) return null;

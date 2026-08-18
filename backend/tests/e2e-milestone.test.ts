@@ -45,15 +45,15 @@ describe('first MVP milestone', () => {
     const foremanBootstrap = await request(app).get('/api/mobile/bootstrap').set('authorization', `Bearer ${foremanToken}`);
     expect(foremanBootstrap.body.objects).toHaveLength(1);
     expect(foremanBootstrap.body.objects[0].tasks).toContainEqual(expect.objectContaining({ id: taskId, assignee: 'E2E Foreman' }));
-    const photo = await request(app).post('/api/uploads').set('authorization', `Bearer ${foremanToken}`).set('idempotency-key', 'e2e-photo-1').set('x-task-id', taskId).set('content-type', 'image/jpeg').send(Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const photo = await request(app).post('/api/uploads').set('authorization', `Bearer ${foremanToken}`).set('idempotency-key', 'e2e-photo-1').set('x-task-id', taskId).set('content-type', 'image/jpeg').send(Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(1020), Buffer.from([0xff, 0xd9])]));
     expect(photo.status).toBe(201);
+    const reviewerAssignment = await request(app).post(`/api/tasks/${taskId}/reviewer`).set('authorization', `Bearer ${pmToken}`).send({ reviewerId: inspectorId });
+    expect(reviewerAssignment.status).toBe(200);
     const submitted = await request(app).post(`/api/tasks/${taskId}/close`).set('authorization', `Bearer ${foremanToken}`).set('idempotency-key', 'e2e-close-1').send({ photoUrl: photo.body.url, geoLat: 41.3111, geoLng: 69.2797 });
     expect(submitted.body.status).toBe('review');
     const closeReplay = await request(app).post(`/api/tasks/${taskId}/close`).set('authorization', `Bearer ${foremanToken}`).set('idempotency-key', 'e2e-close-1').send({ photoUrl: photo.body.url, geoLat: 41.3111, geoLng: 69.2797 });
     expect(closeReplay.headers['idempotency-replayed']).toBe('true');
 
-    const reviewerAssignment = await request(app).post(`/api/tasks/${taskId}/reviewer`).set('authorization', `Bearer ${pmToken}`).send({ reviewerId: inspectorId });
-    expect(reviewerAssignment.status).toBe(200);
 
     const inspectorToken = await login('inspector-e2e@example.com');
     const inspectorBootstrap = await request(app).get('/api/mobile/bootstrap').set('authorization', `Bearer ${inspectorToken}`);

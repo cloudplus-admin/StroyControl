@@ -93,8 +93,9 @@ export async function closeTask(
       const closed = await tx.task.update({
         where: { id: taskId },
         data: {
-          status: 'review',
+          status: task.reviewerId ? 'review' : 'done',
           submittedAt: new Date(),
+          ...(!task.reviewerId ? { actualEnd: new Date(), closedAt: new Date() } : {}),
           closurePhotoUrl: input.photoUrls[0],
           closurePhotos: input.photoUrls,
           closureGeoLat: input.geoLat,
@@ -105,11 +106,12 @@ export async function closeTask(
         data: {
           objectId: task.workSection.stage.objectId,
           kind: 'status_change',
-          body: `Задача «${task.title}» отправлена на проверку (фото + геометка)`,
+          body: task.reviewerId
+            ? `Задача «${task.title}» отправлена на проверку (фото + геометка)`
+            : `Задача «${task.title}» завершена (фото + геометка)`,
         },
       });
       if (task.reviewerId) await notifyUsers(tx, { companyId, userIds: [task.reviewerId], objectId: task.workSection.stage.objectId, kind: 'task_review', title: 'Задача ожидает проверки', body: task.title, entityType: 'task', entityId: taskId });
-      else await notifyObjectRoles(tx, { companyId, objectId: task.workSection.stage.objectId, roleCodes: ['inspector'], kind: 'task_review', title: 'Задача ожидает проверки', body: task.title, entityType: 'task', entityId: taskId });
       if (options.actorId) {
         await tx.auditLog.create({
           data: {
@@ -183,11 +185,12 @@ export async function assignTaskReviewer(
   reviewerId: string,
   options: { userId: string; roles: { code: string; objectId: string | null }[] },
 ) {
-  const task = await prisma.task.findFirst({ where: scopedTaskWhere(companyId, taskId), select: { id: true, title: true, workSection: { select: { stage: { select: { objectId: true } } } } } });
+  const task = await prisma.task.findFirst({ where: scopedTaskWhere(companyId, taskId), select: { id: true, title: true, assigneeId: true, workSection: { select: { stage: { select: { objectId: true } } } } } });
   if (!task) return null;
   const objectId = task.workSection.stage.objectId;
   const allowed = options.roles.some((role) => ['admin', 'owner', 'pm'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
   if (!allowed) return { kind: 'forbidden' as const };
+  if (task.assigneeId === reviewerId) return { kind: 'same_user' as const };
   const reviewer = await prisma.user.findFirst({ where: { id: reviewerId, companyId, roles: { some: { role: { code: 'inspector' }, OR: [{ objectId: null }, { objectId }] } } }, select: { id: true, fullName: true } });
   if (!reviewer) return { kind: 'invalid_reviewer' as const };
   const updated = await prisma.$transaction(async (tx) => {

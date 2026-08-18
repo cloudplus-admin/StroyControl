@@ -22,6 +22,17 @@ export type Session = {
 type FetchLike = typeof fetch;
 type SessionUpdater = (session: Session | null) => Promise<void>;
 
+const imageDownloadPromises = new Map<string, Promise<string>>();
+
+function stableUrlHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 export class ApiClient {
   private refreshPromise: Promise<boolean> | null = null;
 
@@ -57,6 +68,70 @@ export class ApiClient {
     if (response.status !== 401 || !this.session?.refreshToken) return response;
     if (await this.refresh()) response = await this.authorizedFetch(path, init);
     return response;
+  }
+
+  async uploadFile(path: string, fileUri: string, headers: Record<string, string>): Promise<Response> {
+    let response = await this.authorizedFileUpload(path, fileUri, headers);
+    if (response.status !== 401 || !this.session?.refreshToken) return response;
+    if (await this.refresh()) response = await this.authorizedFileUpload(path, fileUri, headers);
+    return response;
+  }
+
+  async downloadFile(url: string, targetUri: string): Promise<string> {
+    let result = await this.authorizedFileDownload(url, targetUri);
+    if (result.status === 401 && this.session?.refreshToken && await this.refresh()) result = await this.authorizedFileDownload(url, targetUri);
+    if (result.status < 200 || result.status >= 300) throw new Error(`HTTP ${result.status}`);
+    return result.uri;
+  }
+
+  async cachedImage(url: string): Promise<string> {
+    const existing = imageDownloadPromises.get(url);
+    if (existing) return existing;
+
+    const promise = this.downloadAndCacheImage(url).finally(() => imageDownloadPromises.delete(url));
+    imageDownloadPromises.set(url, promise);
+    return promise;
+  }
+
+  private async downloadAndCacheImage(url: string): Promise<string> {
+    const FileSystem = await import('expo-file-system/legacy');
+    const extension = new URL(url).pathname.match(/\.(jpe?g|png|webp)$/i)?.[0]?.toLowerCase() ?? '.img';
+    const targetUri = `${FileSystem.cacheDirectory}stroycontrol-photo-${stableUrlHash(url)}${extension}`;
+    const cached = await FileSystem.getInfoAsync(targetUri);
+    if (cached.exists && (cached.size ?? 0) > 0) return targetUri;
+
+    const temporaryUri = `${targetUri}.part`;
+    await FileSystem.deleteAsync(temporaryUri, { idempotent: true });
+    try {
+      const downloadedUri = await this.downloadFile(url, temporaryUri);
+      await FileSystem.deleteAsync(targetUri, { idempotent: true });
+      await FileSystem.moveAsync({ from: downloadedUri, to: targetUri });
+      return targetUri;
+    } catch (error) {
+      await FileSystem.deleteAsync(temporaryUri, { idempotent: true });
+      throw error;
+    }
+  }
+
+  private async authorizedFileDownload(url: string, targetUri: string): Promise<{ uri: string; status: number }> {
+    const FileSystem = await import('expo-file-system/legacy');
+    const headers: Record<string, string> = {};
+    if (this.session?.accessToken) headers.authorization = `Bearer ${this.session.accessToken}`;
+    if (this.session?.user?.companyId) headers['x-company-id'] = this.session.user.companyId;
+    return FileSystem.downloadAsync(url, targetUri, { headers });
+  }
+
+  private async authorizedFileUpload(path: string, fileUri: string, requestHeaders: Record<string, string>): Promise<Response> {
+    const FileSystem = await import('expo-file-system/legacy');
+    const headers = { ...requestHeaders };
+    if (this.session?.accessToken) headers.authorization = `Bearer ${this.session.accessToken}`;
+    if (this.session?.user?.companyId) headers['x-company-id'] = this.session.user.companyId;
+    const result = await FileSystem.uploadAsync(`${this.baseUrl}${path}`, fileUri, {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      headers,
+    });
+    return new Response(result.body, { status: result.status, headers: result.headers });
   }
 
   private async authorizedFetch(path: string, init: RequestInit): Promise<Response> {

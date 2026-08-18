@@ -49,10 +49,12 @@ describe('POST /api/objects', () => {
     const res = await request(app)
       .post('/api/objects')
       .set('x-company-id', company.id)
-      .send({ name: 'ЖК Тест', address: 'г. Ташкент', templateCode: 'high_rise' });
+      .send({ name: 'ЖК Тест', address: 'г. Ташкент', latitude: 41.311081, longitude: 69.240562, templateCode: 'high_rise' });
 
     expect(res.status).toBe(201);
     expect(res.body.name).toBe('ЖК Тест');
+    expect(res.body.latitude).toBe(41.311081);
+    expect(res.body.longitude).toBe(69.240562);
     expect(res.body.stages.length).toBe(3);
     expect(res.body.stages[0].sections.length).toBeGreaterThan(0);
   });
@@ -60,6 +62,16 @@ describe('POST /api/objects', () => {
   it('rejects an empty name', async () => {
     const company = await seedCompany();
     const res = await request(app).post('/api/objects').set('x-company-id', company.id).send({ name: '' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('validation_error');
+  });
+
+  it('rejects coordinates outside valid ranges', async () => {
+    const company = await seedCompany();
+    const res = await request(app)
+      .post('/api/objects')
+      .set('x-company-id', company.id)
+      .send({ name: 'Неверная точка', latitude: 91, longitude: 181 });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('validation_error');
   });

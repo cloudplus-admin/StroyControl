@@ -7,6 +7,7 @@ import { prisma } from '../../db/prisma';
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 const EXTENSION: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'application/pdf': '.pdf' };
 const MAX_BYTES = 12 * 1024 * 1024;
+const MIN_IMAGE_BYTES = 1024;
 const uploadDir = process.env.UPLOAD_DIR ?? path.resolve(process.cwd(), 'uploads');
 
 function hasValidSignature(mimeType: string, body: Buffer) {
@@ -40,6 +41,7 @@ uploadsRouter.post('/', raw({ type: [...ALLOWED_MIME], limit: MAX_BYTES }), asyn
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'File body is required' });
     if (req.body.length > MAX_BYTES) return res.status(413).json({ error: 'File is too large' });
     if (!hasValidSignature(mimeType, req.body)) return res.status(415).json({ error: 'File content does not match the declared image type' });
+    if (mimeType.startsWith('image/') && req.body.length < MIN_IMAGE_BYTES) return res.status(422).json({ error: 'Image file is empty or corrupted' });
 
     const storageKey = `${companyId}/${randomUUID()}${EXTENSION[mimeType]}`;
     const diskPath = path.join(uploadDir, storageKey);

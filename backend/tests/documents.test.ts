@@ -47,6 +47,8 @@ describe('documents and customer portal', () => {
     const forbidden = await request(app).post(`/api/objects/${f.object.id}/acts`).set('authorization', `Bearer ${f.customerToken}`).send({ template: 'completed', number: 'A-1', title: 'Работы', amount: 1500 });
     expect(forbidden.status).toBe(403);
     const created = await request(app).post(`/api/objects/${f.object.id}/acts`).set('authorization', `Bearer ${f.adminToken}`).send({ template: 'completed', number: `A-${Date.now()}`, title: 'Выполненные работы', amount: 1500 });
+    const adminSign = await request(app).post(`/api/acts/${created.body.id}/sign`).set('authorization', `Bearer ${f.adminToken}`);
+    expect(adminSign.status).toBe(403); expect(adminSign.body.error).toBe('forbidden');
     const signed = await request(app).post(`/api/acts/${created.body.id}/sign`).set('authorization', `Bearer ${f.customerToken}`);
     expect(signed.status).toBe(200); expect(signed.body.status).toBe('signed');
     const repeated = await request(app).post(`/api/acts/${created.body.id}/sign`).set('authorization', `Bearer ${f.customerToken}`);

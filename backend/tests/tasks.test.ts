@@ -78,10 +78,12 @@ describe('Task checklist and closure', () => {
 
   it('submits a task with multiple photos and geotag for review', async () => {
     const { company, sectionId } = await seedCompanyWithSection();
+    const reviewer = await prisma.user.create({ data: { companyId: company.id, email: 'reviewer@example.com', passwordHash: 'hash', fullName: 'Проверяющий' } });
     const taskRes = await request(app)
       .post(`/api/objects/sections/${sectionId}/tasks`)
       .set('x-company-id', company.id)
       .send({ title: 'Задача с площадки' });
+    await prisma.task.update({ where: { id: taskRes.body.id }, data: { reviewerId: reviewer.id } });
 
     const closeRes = await request(app)
       .post(`/api/tasks/${taskRes.body.id}/close`)
@@ -93,6 +95,15 @@ describe('Task checklist and closure', () => {
     expect(closeRes.body.status).toBe('review');
     expect(closeRes.body.closurePhotoUrl).toBe('https://example.com/photo-1.jpg');
     expect(closeRes.body.closurePhotos).toEqual(['https://example.com/photo-1.jpg', 'https://example.com/photo-2.jpg']);
+  });
+
+  it('completes a task immediately when no reviewer is assigned', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const taskRes = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Без приемки' });
+    const closeRes = await request(app).post(`/api/tasks/${taskRes.body.id}/close`).set('x-company-id', company.id).set('idempotency-key', 'close-without-reviewer').send({ photoUrl: 'https://example.com/done.jpg', geoLat: 41.3, geoLng: 69.2 });
+    expect(closeRes.status).toBe(200);
+    expect(closeRes.body.status).toBe('done');
+    expect(closeRes.body.closedAt).toBeTruthy();
   });
 
   it('replays the same offline close operation without duplicate side effects', async () => {

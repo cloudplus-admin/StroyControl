@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { addCrewShift, addDefectPhoto, addDocument, addJournalEntry, addMessage, addQualityPhoto, advanceSafetyViolation, advanceSupplyRequest, attachActPdf, closeTask, createDefect, createSafetyViolation, createSupplyRequest, createWorkAct, moveStock, reviewQualityReport, saveCrew, saveMaterial, saveSafetyChecklist, seedData, submitQualityReport, toggleChecklist, toggleCrew, toggleToolIssue } from './domain';
-import { createBackup, validateBackup } from './storage';
 
 describe('offline domain', () => {
   it('stores checklist change in sync queue', () => {
@@ -11,7 +10,7 @@ describe('offline domain', () => {
 
   it('requires field evidence in task close command', () => {
     const result = closeTask(seedData, 't-101', ['file:///photo-1.jpg', 'file:///photo-2.jpg'], 41.31, 69.28);
-    expect(result.tasks[0]).toMatchObject({ status: 'review', photoUri: 'file:///photo-1.jpg', photoUris: ['file:///photo-1.jpg', 'file:///photo-2.jpg'], latitude: 41.31, longitude: 69.28 });
+    expect(result.tasks[0]).toMatchObject({ status: 'done', photoUri: 'file:///photo-1.jpg', photoUris: ['file:///photo-1.jpg', 'file:///photo-2.jpg'], latitude: 41.31, longitude: 69.28 });
     expect(result.queue.at(-1)?.type).toBe('task.closed');
     expect(result.queue.at(-1)?.payload).toMatchObject({ photoUrls: ['file:///photo-1.jpg', 'file:///photo-2.jpg'] });
   });
@@ -130,8 +129,8 @@ describe('offline domain', () => {
     expect(result.safetyViolations[0]).toMatchObject({ status: 'closed', closedAt: expect.any(String) });
   });
 
-  it('creates a signed work act and attaches generated PDF', () => {
-    let result = createWorkAct(seedData, { projectId: 'p1', template: 'completed', number: '12', title: 'Монолитные работы', contractor: 'Строй ООО', customer: 'Заказчик ООО', amount: 15000000, date: '2026-08-01', notes: '', signature: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }] });
+  it('creates a work act without a drawn signature and attaches generated PDF', () => {
+    let result = createWorkAct(seedData, { projectId: 'p1', template: 'completed', number: '12', title: 'Монолитные работы', contractor: 'Строй ООО', customer: 'Заказчик ООО', amount: 15000000, date: '2026-08-01', notes: '', signature: [] });
     const id = result.acts[0]!.id;
     expect(result.acts[0]).toMatchObject({ number: '12', template: 'completed', amount: 15000000 });
     result = attachActPdf(result, id, 'file:///act-12.pdf');
@@ -139,9 +138,4 @@ describe('offline domain', () => {
     expect(result.queue.at(-1)?.type).toBe('act.signed');
   });
 
-  it('validates a complete local backup', () => {
-    expect(validateBackup(createBackup(seedData))?.materials.length).toBeGreaterThan(0);
-    expect(validateBackup({ tasks: [] })).toBeNull();
-    expect(validateBackup({ ...createBackup(seedData), version: 999 })).toBeNull();
-  });
 });

@@ -3,6 +3,7 @@ export type Tab =
   | "objects"
   | "tasks"
   | "quality"
+  | "cameras"
   | "feed"
   | "supply"
   | "profile";

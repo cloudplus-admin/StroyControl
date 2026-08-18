@@ -1,6 +1,6 @@
 {
   "name": "stroycontrol-mobile",
-  "version": "1.0.20",
+  "version": "1.0.73",
   "private": true,
   "main": "index.ts",
   "scripts": {
@@ -22,7 +22,9 @@
     "expo-camera": "~57.0.3",
     "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.2",
+    "expo-image-manipulator": "~57.0.9",
     "expo-image-picker": "~57.0.9",
+    "expo-intent-launcher": "~57.0.1",
     "expo-location": "~57.0.9",
     "expo-print": "~57.0.1",
     "expo-secure-store": "~57.0.1",
@@ -31,6 +33,8 @@
     "expo-system-ui": "~57.0.2",
     "react": "19.2.3",
     "react-native": "0.86.2",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0"
   },
   "devDependencies": {

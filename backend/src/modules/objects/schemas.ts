@@ -5,6 +5,8 @@ export const createObjectSchema = z.object({
   nameUz: z.string().min(1).max(200).optional(),
   address: z.string().max(300).optional(),
   addressUz: z.string().max(300).optional(),
+  latitude: z.number().finite().min(-90).max(90).optional(),
+  longitude: z.number().finite().min(-180).max(180).optional(),
   templateCode: z.enum(['high_rise', 'typical_house', 'renovation']).optional(),
 });
 
@@ -13,6 +15,8 @@ export const updateObjectSchema = z.object({
   nameUz: z.string().min(1).max(200).optional(),
   address: z.string().max(300).optional(),
   addressUz: z.string().max(300).optional(),
+  latitude: z.number().finite().min(-90).max(90).nullable().optional(),
+  longitude: z.number().finite().min(-180).max(180).nullable().optional(),
   status: z.enum(['active', 'on_hold', 'completed']).optional(),
 });
 

@@ -162,7 +162,7 @@ describe('auth', () => {
       .set('idempotency-key', 'audited-photo-1')
       .set('x-task-id', task.id)
       .set('content-type', 'image/jpeg')
-      .send(Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+      .send(Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(1020), Buffer.from([0xff, 0xd9])]));
     expect(upload.status).toBe(201);
     const closed = await request(app)
       .post(`/api/tasks/${task.id}/close`)

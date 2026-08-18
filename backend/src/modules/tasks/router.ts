@@ -145,6 +145,7 @@ tasksRouter.post('/:id/reviewer', async (req, res, next) => {
     if (!result) return res.status(404).json({ error: 'not_found' });
     if (result.kind === 'forbidden') return res.status(403).json({ error: 'Insufficient permissions' });
     if (result.kind === 'invalid_reviewer') return res.status(400).json({ error: 'Reviewer is not an inspector assigned to this object' });
+    if (result.kind === 'same_user') return res.status(400).json({ error: 'Assignee and reviewer must be different users' });
     return res.json(result.task);
   } catch (err) { if (handleZodError(err, res, next)) return; }
 });

@@ -1,8 +1,16 @@
-const { withAppBuildGradle } = require('expo/config-plugins');
+const { withAndroidManifest, withAppBuildGradle } = require('expo/config-plugins');
 
 const MARKER = '// STROYCONTROL_RELEASE_SIGNING';
 
 module.exports = function withAndroidReleaseSigning(config) {
+  config = withAndroidManifest(config, (mod) => {
+    const manifest = mod.modResults.manifest;
+    manifest['uses-feature'] = manifest['uses-feature'] ?? [];
+    if (!manifest['uses-feature'].some((item) => item.$?.['android:name'] === 'android.hardware.camera')) {
+      manifest['uses-feature'].push({ $: { 'android:name': 'android.hardware.camera', 'android:required': 'false' } });
+    }
+    return mod;
+  });
   return withAppBuildGradle(config, (mod) => {
     if (mod.modResults.language !== 'groovy' || mod.modResults.contents.includes(MARKER)) {
       return mod;

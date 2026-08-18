@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  AppState,
   BackHandler,
   Image,
   KeyboardAvoidingView,
@@ -17,12 +18,16 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Reanimated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import NetInfo from "@react-native-community/netinfo";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import * as Location from "expo-location";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import * as IntentLauncher from "expo-intent-launcher";
 import * as Print from "expo-print";
 import {
   RecordingPresets,
@@ -64,24 +69,74 @@ import {
   toggleToolIssue,
 } from "./src/domain";
 import {
-  createBackup,
   loadData,
   loadPreferences,
   saveData,
   savePreferences,
-  validateBackup,
 } from "./src/storage";
 import {
   NotificationTarget,
   Tab,
   tabForNotification,
 } from "./src/navigation";
+
+type SignaturePoint = { x: number; y: number };
+
+const SignaturePad = memo(function SignaturePad({ value, hint, onChange }: { value: SignaturePoint[]; hint: string; onChange: (points: SignaturePoint[]) => void }) {
+  const [points, setPoints] = useState<SignaturePoint[]>(value);
+  const pointsRef = useRef(points);
+  const onChangeRef = useRef(onChange);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => {
+    pointsRef.current = value;
+    setPoints(value);
+  }, [value]);
+
+  const updatePoints = (next: SignaturePoint[]) => {
+    pointsRef.current = next;
+    if (frameRef.current !== null) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      setPoints(pointsRef.current);
+    });
+  };
+  useEffect(() => () => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+  }, []);
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (event) => updatePoints([...pointsRef.current, { x: event.nativeEvent.locationX, y: event.nativeEvent.locationY }]),
+    onPanResponderMove: (event) => {
+      const point = { x: event.nativeEvent.locationX, y: event.nativeEvent.locationY };
+      const previous = pointsRef.current.at(-1);
+      if (previous && Math.abs(previous.x - point.x) + Math.abs(previous.y - point.y) < 3) return;
+      updatePoints([...pointsRef.current, point]);
+    },
+    onPanResponderRelease: () => {
+      setPoints(pointsRef.current);
+      onChangeRef.current(pointsRef.current);
+    },
+    onPanResponderTerminate: () => {
+      setPoints(pointsRef.current);
+      onChangeRef.current(pointsRef.current);
+    },
+  })).current;
+
+  return <View style={s.signaturePad} {...pan.panHandlers}>
+    {points.filter((_, index) => index % Math.max(1, Math.ceil(points.length / 80)) === 0).map((point, index) => <View key={index} style={[s.signatureDot, { left: point.x, top: point.y }]} />)}
+    {points.length === 0 && <Text style={s.signatureHint}>{hint}</Text>}
+  </View>;
+});
 import { ApiClient, Session } from "./src/api";
 import { loadSession, saveSession } from "./src/auth-storage";
 import { syncQueue } from "./src/sync";
 import { refreshServerData } from "./src/bootstrap";
 import { formatDate, formatDateTime, localeCode, uiCopy, type UiCopy } from "./src/i18n";
-import { dateInputToIso, formatDateInput, isoToDateInput } from "./src/dateInput";
+import { dateInputToDeadlineIso, dateInputToIso, formatDateInput, isoToDateInput } from "./src/dateInput";
+import { asciiIdempotencyKey } from "./src/httpHeaders";
 
 const roleFromSession = (session: Session | null, preferred: Role | null): Role | null => {
   const available = (session?.user?.roles ?? []).map((item) => item.code === 'owner' ? 'director' : item.code).filter((code): code is Role => roles.some((item) => item.id === code));
@@ -90,13 +145,13 @@ const roleFromSession = (session: Session | null, preferred: Role | null): Role 
 };
 
 const tabsByRole: Record<Role, Tab[]> = {
-  director: ['home', 'objects', 'tasks', 'feed', 'profile'],
-  pm: ['home', 'objects', 'tasks', 'feed', 'profile'],
+  director: ['home', 'objects', 'tasks', 'cameras', 'feed', 'profile'],
+  pm: ['home', 'objects', 'tasks', 'cameras', 'feed', 'profile'],
   foreman: ['home', 'objects', 'tasks', 'feed', 'profile'],
   inspector: ['home', 'tasks', 'quality', 'feed', 'profile'],
   supplier: ['home', 'objects', 'profile'],
   finance: ['home', 'objects', 'feed', 'profile'],
-  customer: ['home', 'objects', 'tasks', 'feed', 'profile'],
+  customer: ['home', 'objects', 'tasks', 'cameras', 'feed', 'profile'],
   subcontractor: ['home', 'objects', 'tasks', 'feed', 'profile'],
   admin: ['home', 'objects', 'tasks', 'feed', 'profile'],
 };
@@ -154,70 +209,144 @@ type PlanningUser = { id: string; fullName: string };
 type PlanningSection = { id: string; name: string; stage: string };
 const copy = uiCopy;
 
-function PhotoViewer({ uri, headers, compact = false }: { uri: string; headers?: Record<string, string>; compact?: boolean }) {
+function PhotoViewer({ uri, api, compact = false }: { uri: string; api?: ApiClient | null; compact?: boolean }) {
   const [opened, setOpened] = useState(false);
-  const scale = useRef(new Animated.Value(1)).current;
-  const translateX = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(0)).current;
-  const gesture = useRef({ scale: 1, x: 0, y: 0, startScale: 1, startX: 0, startY: 0, distance: 0 }).current;
-  const source = { uri, headers };
-  const applyTransform = (nextScale: number, x = gesture.x, y = gesture.y) => {
-    gesture.scale = Math.max(1, Math.min(5, nextScale));
-    gesture.x = gesture.scale === 1 ? 0 : x;
-    gesture.y = gesture.scale === 1 ? 0 : y;
-    scale.setValue(gesture.scale);
-    translateX.setValue(gesture.x);
-    translateY.setValue(gesture.y);
+  const [resolvedUri, setResolvedUri] = useState(/^https?:\/\//.test(uri) && api ? '' : uri);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const zoom = useSharedValue(1);
+  const offsetX = useSharedValue(0);
+  const offsetY = useSharedValue(0);
+  const viewportWidth = useSharedValue(0);
+  const viewportHeight = useSharedValue(0);
+  const fittedWidth = useSharedValue(0);
+  const fittedHeight = useSharedValue(0);
+  const imageWidth = useSharedValue(0);
+  const imageHeight = useSharedValue(0);
+  const pinchStartScale = useSharedValue(1);
+  const pinchStartX = useSharedValue(0);
+  const pinchStartY = useSharedValue(0);
+  const pinchStartFocalX = useSharedValue(0);
+  const pinchStartFocalY = useSharedValue(0);
+  const panStartX = useSharedValue(0);
+  const panStartY = useSharedValue(0);
+  useEffect(() => {
+    let active = true;
+    setLoadFailed(false);
+    if (!api || !/^https?:\/\//.test(uri)) {
+      setResolvedUri(uri);
+      return () => { active = false; };
+    }
+    setResolvedUri('');
+    void api.cachedImage(uri)
+      .then((localUri) => { if (active) setResolvedUri(localUri); })
+      .catch(() => { if (active) setLoadFailed(true); });
+    return () => { active = false; };
+  }, [api, retry, uri]);
+  const source = useMemo(() => ({ uri: resolvedUri }), [resolvedUri]);
+  const clampOffset = (value: number, nextScale: number, viewport: number, fitted: number) => {
+    "worklet";
+    const limit = Math.max(0, (fitted * nextScale - viewport) / 2);
+    return Math.max(-limit, Math.min(limit, value));
   };
-  const resetZoom = () => {
-    gesture.scale = 1; gesture.x = 0; gesture.y = 0;
-    Animated.parallel([
-      Animated.spring(scale, { toValue: 1, useNativeDriver: true }),
-      Animated.spring(translateX, { toValue: 0, useNativeDriver: true }),
-      Animated.spring(translateY, { toValue: 0, useNativeDriver: true }),
-    ]).start();
+  const resetZoom = (animated = true) => {
+    const value = (target: number) => animated ? withTiming(target, { duration: 220 }) : target;
+    zoom.value = value(1); offsetX.value = value(0); offsetY.value = value(0);
   };
-  const distance = (touches: readonly { pageX: number; pageY: number }[]) => {
-    const [a, b] = touches;
-    return a && b ? Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY) : 0;
-  };
-  const responder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, state) => state.numberActiveTouches > 1 || gesture.scale > 1,
-    onPanResponderGrant: (event) => {
-      gesture.startScale = gesture.scale;
-      gesture.startX = gesture.x;
-      gesture.startY = gesture.y;
-      gesture.distance = distance(event.nativeEvent.touches);
-    },
-    onPanResponderMove: (event, state) => {
-      if (event.nativeEvent.touches.length >= 2) {
-        const currentDistance = distance(event.nativeEvent.touches);
-        if (gesture.distance > 0) applyTransform(gesture.startScale * currentDistance / gesture.distance);
-      } else if (gesture.scale > 1) {
-        applyTransform(gesture.scale, gesture.startX + state.dx, gesture.startY + state.dy);
+  const pinch = Gesture.Pinch()
+    .onBegin((event) => {
+      pinchStartScale.value = zoom.value;
+      pinchStartX.value = offsetX.value;
+      pinchStartY.value = offsetY.value;
+      pinchStartFocalX.value = event.focalX;
+      pinchStartFocalY.value = event.focalY;
+    })
+    .onUpdate((event) => {
+      const nextScale = Math.max(1, Math.min(4, pinchStartScale.value * event.scale));
+      const ratio = nextScale / pinchStartScale.value;
+      const nextX = pinchStartX.value + event.focalX - pinchStartFocalX.value + (1 - ratio) * (pinchStartFocalX.value - viewportWidth.value / 2 - pinchStartX.value);
+      const nextY = pinchStartY.value + event.focalY - pinchStartFocalY.value + (1 - ratio) * (pinchStartFocalY.value - viewportHeight.value / 2 - pinchStartY.value);
+      zoom.value = nextScale;
+      offsetX.value = clampOffset(nextX, nextScale, viewportWidth.value, fittedWidth.value);
+      offsetY.value = clampOffset(nextY, nextScale, viewportHeight.value, fittedHeight.value);
+    })
+    .onEnd(() => {
+      if (zoom.value < 1.02) {
+        zoom.value = withTiming(1); offsetX.value = withTiming(0); offsetY.value = withTiming(0);
       }
-    },
-  })).current;
-  const close = () => { resetZoom(); setOpened(false); };
+    });
+  const pan = Gesture.Pan().maxPointers(1).minDistance(2)
+    .onBegin(() => { panStartX.value = offsetX.value; panStartY.value = offsetY.value; })
+    .onUpdate((event) => {
+      if (zoom.value <= 1) return;
+      offsetX.value = clampOffset(panStartX.value + event.translationX, zoom.value, viewportWidth.value, fittedWidth.value);
+      offsetY.value = clampOffset(panStartY.value + event.translationY, zoom.value, viewportHeight.value, fittedHeight.value);
+    });
+  const doubleTap = Gesture.Tap().numberOfTaps(2).maxDuration(250).maxDelay(260)
+    .onEnd((event, success) => {
+      if (!success) return;
+      if (zoom.value > 1) {
+        zoom.value = withTiming(1); offsetX.value = withTiming(0); offsetY.value = withTiming(0);
+        return;
+      }
+      const nextScale = 2;
+      offsetX.value = withTiming(clampOffset(-(event.x - viewportWidth.value / 2), nextScale, viewportWidth.value, fittedWidth.value));
+      offsetY.value = withTiming(clampOffset(-(event.y - viewportHeight.value / 2), nextScale, viewportHeight.value, fittedHeight.value));
+      zoom.value = withTiming(nextScale);
+    });
+  const composedGesture = Gesture.Simultaneous(pinch, pan, doubleTap);
+  const imageStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: offsetX.value }, { translateY: offsetY.value }, { scale: zoom.value }],
+  }));
+  const close = () => { resetZoom(false); setOpened(false); };
+  const open = () => { resetZoom(false); setOpened(true); };
+  if (!resolvedUri) {
+    return <View style={[compact ? s.defectPhoto : s.photo, s.photoState]}>
+      <Text style={loadFailed ? s.photoError : s.muted}>{loadFailed ? 'Фото не загрузилось' : 'Загрузка фото...'}</Text>
+      {loadFailed && <Pressable style={s.photoRetry} onPress={() => setRetry((value) => value + 1)}><Text style={s.outlineText}>Повторить</Text></Pressable>}
+    </View>;
+  }
   return <>
-    <Pressable accessibilityRole="button" accessibilityLabel="Открыть фото на весь экран" onPress={() => setOpened(true)}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Открыть фото на весь экран" onPress={open}>
       <Image source={source} resizeMode="contain" style={compact ? s.defectPhoto : s.photo} />
     </Pressable>
     <Modal visible={opened} transparent animationType="fade" statusBarTranslucent onRequestClose={close}>
-      <View style={s.photoViewer}>
+      <GestureHandlerRootView style={s.photoViewer}>
         <Pressable style={s.photoViewerClose} onPress={close} hitSlop={12}>
           <Text style={s.photoViewerCloseText}>×</Text>
         </Pressable>
-        <View style={s.photoViewerContent} {...responder.panHandlers}>
-          <Animated.Image source={source} resizeMode="contain" style={[s.photoViewerImage, { transform: [{ translateX }, { translateY }, { scale }] }]} />
+        <GestureDetector gesture={composedGesture}>
+        <View
+          style={s.photoViewerContent}
+          onLayout={(event) => {
+            const width = event.nativeEvent.layout.width;
+            const height = event.nativeEvent.layout.height;
+            viewportWidth.value = width;
+            viewportHeight.value = height;
+            if (imageWidth.value > 0 && imageHeight.value > 0) {
+              const ratio = Math.min(width / imageWidth.value, height / imageHeight.value);
+              fittedWidth.value = imageWidth.value * ratio;
+              fittedHeight.value = imageHeight.value * ratio;
+            }
+          }}
+        >
+            <Reanimated.Image
+              source={source}
+              resizeMode="contain"
+              onLoad={(event) => {
+                const width = event.nativeEvent.source.width;
+                const height = event.nativeEvent.source.height;
+                imageWidth.value = width;
+                imageHeight.value = height;
+                const ratio = Math.min(viewportWidth.value / width, viewportHeight.value / height);
+                fittedWidth.value = width * ratio;
+                fittedHeight.value = height * ratio;
+              }}
+              style={[s.photoViewerImage, imageStyle]}
+            />
         </View>
-        <View style={s.photoViewerControls}>
-          <Pressable style={s.photoViewerControl} onPress={() => applyTransform(gesture.scale - 0.5)}><Text style={s.photoViewerControlText}>−</Text></Pressable>
-          <Pressable style={s.photoViewerControl} onPress={resetZoom}><Text style={s.photoViewerResetText}>1:1</Text></Pressable>
-          <Pressable style={s.photoViewerControl} onPress={() => applyTransform(gesture.scale + 0.5)}><Text style={s.photoViewerControlText}>+</Text></Pressable>
-        </View>
-      </View>
+        </GestureDetector>
+      </GestureHandlerRootView>
     </Modal>
   </>;
 }
@@ -225,12 +354,47 @@ function PhotoViewer({ uri, headers, compact = false }: { uri: string; headers?:
 async function shareFile(uri: string, name: string, api: ApiClient | null) {
   let localUri = uri;
   if (/^https?:\/\//.test(uri)) {
-    const token = api?.getSession()?.accessToken;
     const target = `${FileSystem.cacheDirectory}${name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const downloaded = await FileSystem.downloadAsync(uri, target, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
-    localUri = downloaded.uri;
+    localUri = api ? await api.downloadFile(uri, target) : (await FileSystem.downloadAsync(uri, target)).uri;
   }
-  if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(localUri, { mimeType: 'application/pdf' });
+  if (Platform.OS === 'android') {
+    const contentUri = await FileSystem.getContentUriAsync(localUri);
+    try {
+      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        data: contentUri,
+        type: 'application/pdf',
+        flags: 1,
+        packageName: 'uz.cloudplus.stroycontrol',
+        className: 'uz.cloudplus.stroycontrol.PdfViewerActivity',
+      });
+      return;
+    } catch {
+      // Fall through to an installed external PDF viewer.
+    }
+    try {
+      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        data: contentUri,
+        type: 'application/pdf',
+        flags: 1,
+      });
+      return;
+    } catch {
+      // A device without a PDF viewer can still save or forward the file.
+    }
+  }
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(localUri, { mimeType: 'application/pdf', dialogTitle: name });
+    return;
+  }
+  throw new Error('На устройстве нет доступного способа открыть PDF.');
+}
+
+async function openPdf(uri: string, name: string, api: ApiClient | null, errorTitle: string) {
+  try {
+    await shareFile(uri, name, api);
+  } catch (error) {
+    Alert.alert(errorTitle, error instanceof Error ? error.message : 'Не удалось скачать или открыть PDF.');
+  }
 }
 
 export default function App() {
@@ -248,9 +412,28 @@ export default function App() {
   const [api, setApi] = useState<ApiClient | null>(null);
   const [serverNotifications, setServerNotifications] = useState<{ id: string; title: string; text: string; kind: "info"; target: NotificationTarget }[]>([]);
   const syncing = useRef(false);
+  const refreshing = useRef(false);
+  const dataRef = useRef(data);
   const lastBootstrapKey = useRef('');
   const t = copy[lang];
   const syncTrigger = data.queue.map((item) => `${item.id}:${item.status}:${item.attempts}:${item.nextAttemptAt ?? ''}`).join('|');
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+
+  const refreshTasks = async () => {
+    if (!ready || !online || !api || !session || syncing.current || refreshing.current) return;
+    refreshing.current = true;
+    try {
+      const next = await refreshServerData(dataRef.current, api, lang);
+      dataRef.current = next;
+      setData(next);
+      await saveData(next);
+    } finally {
+      refreshing.current = false;
+    }
+  };
 
   useEffect(
     () => NetInfo.addEventListener((s) => setOnline(Boolean(s.isConnected))),
@@ -269,18 +452,32 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!ready || !online || !api || !session || syncing.current || data.queue.length === 0) return;
-    const sendable = data.queue.filter((item) => ['task.closed', 'task.reviewed'].includes(item.type) && item.payload && item.status !== 'conflict');
+    // Let syncQueue inspect legacy checklist conflicts too: it can safely purge
+    // them after the task has already reached review/done on the server.
+    const sendable = data.queue.filter((item) => item.type === 'task.updated' || (['task.closed', 'task.reviewed'].includes(item.type) && item.payload && item.status !== 'conflict'));
     if (sendable.length === 0) return;
-    const nextAttempt = Math.min(...sendable.map((item) => item.nextAttemptAt ? Date.parse(item.nextAttemptAt) : 0));
+    // Checklist entries from older builds may carry a long retry timestamp even
+    // though the task is already closed on the server. Reconcile server status
+    // immediately so those obsolete entries are not kept until the backoff ends.
+    const hasChecklistEntries = sendable.some((item) => item.type === 'task.updated');
+    const nextAttempt = hasChecklistEntries ? 0 : Math.min(...sendable.map((item) => item.nextAttemptAt ? Date.parse(item.nextAttemptAt) : 0));
     const delay = Math.max(0, nextAttempt - Date.now());
     const timer = setTimeout(() => {
       syncing.current = true;
-      void syncQueue(data, api).then((next) => { setData(next); return saveData(next); }).finally(() => { syncing.current = false; });
+      void refreshServerData(data, api, lang)
+        .catch(() => data)
+        .then((reconciled) => syncQueue(reconciled, api))
+        .then((next) => { setData(next); return saveData(next); })
+        .finally(() => { syncing.current = false; });
     }, delay);
     return () => clearTimeout(timer);
-  }, [api, online, ready, session, syncTrigger]);
+  }, [api, lang, online, ready, session, syncTrigger]);
   useEffect(() => {
-    if (!ready || !online || !api || !session) return;
+    // Do not bootstrap from a stale snapshot while durable operations are being
+    // processed. Otherwise the bootstrap promise can finish after syncQueue and
+    // write the pre-sync queue back to storage (the legacy "17 queued" loop).
+    // Once the queue is empty, this effect runs again and refreshes server data.
+    if (!ready || !online || !api || !session || data.queue.length > 0) return;
     const key = `${session.user?.id ?? 'session'}:${data.queue.length}`;
     if (lastBootstrapKey.current === key) return;
     lastBootstrapKey.current = key;
@@ -288,6 +485,22 @@ export default function App() {
       .then((next) => { setData(next); return saveData(next); })
       .catch(() => { lastBootstrapKey.current = ''; });
   }, [api, data.queue.length, lang, online, ready, session]);
+  useEffect(() => {
+    if (!ready || !online || !api || !session) return;
+
+    if (tab === 'tasks') void refreshTasks().catch(() => undefined);
+    const interval = setInterval(() => {
+      if (AppState.currentState === 'active') void refreshTasks().catch(() => undefined);
+    }, 15_000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refreshTasks().catch(() => undefined);
+    });
+
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, [api, lang, online, ready, session, tab]);
   useEffect(() => {
     if (ready) void savePreferences({ role, lang });
   }, [lang, ready, role]);
@@ -378,17 +591,9 @@ export default function App() {
             <Text style={s.bellText}>!</Text>
             {notifications.length > 0 && <Text style={s.badge}>{notifications.length}</Text>}
           </Pressable>
-          <Pressable
-            style={s.lang}
-            onPress={() => setLang(lang === "ru" ? "uz" : lang === "uz" ? "en" : "ru")}
-          >
-            <Text style={s.langText}>{lang.toUpperCase()}</Text>
-          </Pressable>
-          <Text style={[s.connection, online ? s.ok : s.warn]}>
-            {online ? t.online : t.offline}
-          </Text>
         </View>
       </View>
+      {!online && <View style={s.offlineBar}><Text style={s.offlineText}>{t.offline}</Text></View>}
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
         {showNotifications ? <NotificationsScreen lang={lang} items={notifications} close={() => setShowNotifications(false)} open={(item) => {
           if (item.id.startsWith('server-') && api) void api.request(`/api/notifications/${encodeURIComponent(item.id.slice(7))}/read`, { method: 'POST' });
@@ -404,7 +609,11 @@ export default function App() {
             t={t}
             items={visibleProjects}
             role={role}
-            taskCount={data.tasks.filter((x) => x.status !== "done").length}
+            tasks={data.tasks}
+            openSection={(section) => {
+              setProjectId(null);
+              setTab(section);
+            }}
             openProject={(id) => {
               setProjectId(id);
               setTab("objects");
@@ -427,16 +636,33 @@ export default function App() {
               item={activeProject}
               t={t}
               back={() => setProjectId(null)}
+              openTasks={() => {
+                setProjectId(null);
+                setTab("tasks");
+              }}
             />
           ) : (
-            <ProjectList t={t} items={visibleProjects} open={setProjectId} />
+            <ProjectList
+              lang={lang}
+              t={t}
+              items={visibleProjects}
+              tasks={data.tasks}
+              api={api}
+              canCreate={Boolean(session?.user?.roles.some((item) => ['admin', 'owner', 'pm'].includes(item.code) && item.objectId === null))}
+              open={setProjectId}
+              created={async () => {
+                if (!api) return;
+                const next = await refreshServerData(dataRef.current, api, lang);
+                dataRef.current = next;
+                updateData(next);
+              }}
+            />
           ))}
         {tab === "tasks" && (
           <TasksScreen
             t={t}
             lang={lang}
             role={role}
-            accessToken={session?.accessToken}
             api={api}
             data={data}
             updateData={updateData}
@@ -454,6 +680,9 @@ export default function App() {
             initialSelected={notificationTarget?.screen === "quality" ? notificationTarget.id : null}
             backHome={() => setTab("home")}
           />
+        )}
+        {tab === "cameras" && (
+          <CamerasScreen lang={lang} items={visibleProjects} online={online} />
         )}
         {tab === "feed" && (
           <FeedScreen lang={lang} role={role} api={api} data={data} updateData={updateData} initialSection={notificationTarget?.screen === 'act' ? 'acts' : notificationTarget?.screen === 'document' ? 'docs' : quickAction === "voice" ? "journal" : null} />
@@ -475,8 +704,6 @@ export default function App() {
             lang={lang}
             setLang={setLang}
             activeRole={activeRole}
-            data={data}
-            updateData={updateData}
             logout={async () => { if (!api) return; await api.logout(); setSession(null); setRole(null); }}
           />
         )}
@@ -503,6 +730,8 @@ export default function App() {
                     ? "✓"
                     : id === "quality"
                       ? "◎"
+                      : id === "cameras"
+                        ? "◉"
                       : id === "feed"
                         ? "✉"
                         : id === "supply"
@@ -517,6 +746,42 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
+const CamerasScreen = memo(function CamerasScreen({ lang, items, online }: { lang: Lang; items: Project[]; online: boolean }) {
+  const c = lang === 'uz'
+    ? { eyebrow: 'Videokuzatuv', title: 'Kameralar', body: "Qurilish maydonlaridagi jonli efirlar va arxiv.", all: 'Barcha obyektlar', offline: 'Internet yoqilganda kameralar holati yangilanadi.', noCameras: 'Kameralar ulanmagan', noCamerasBody: "Administrator ushbu obyekt uchun RTSP yoki HLS oqimini sozlagandan keyin translyatsiyalar shu yerda paydo bo'ladi.", object: 'Obyekt', waiting: 'Ulanish kutilmoqda' }
+    : lang === 'en'
+      ? { eyebrow: 'Video surveillance', title: 'Cameras', body: 'Live streams and archive from construction sites.', all: 'All sites', offline: 'Camera status will refresh when the device is online.', noCameras: 'No cameras connected', noCamerasBody: 'Streams will appear here after an administrator configures an RTSP or HLS source for the site.', object: 'Site', waiting: 'Awaiting connection' }
+      : { eyebrow: 'Видеонаблюдение', title: 'Камеры', body: 'Прямые трансляции и архив со строительных объектов.', all: 'Все объекты', offline: 'Статус камер обновится после подключения к интернету.', noCameras: 'Камеры не подключены', noCamerasBody: 'Трансляции появятся здесь после настройки администратором RTSP- или HLS-потока для объекта.', object: 'Объект', waiting: 'Ожидает подключения' };
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const selectedProject = projectId ? items.find((item) => item.id === projectId) : null;
+
+  return <View>
+    <Text style={s.eyebrow}>{c.eyebrow}</Text>
+    <Text style={s.h1}>{c.title}</Text>
+    <Text style={s.muted}>{c.body}</Text>
+    {!online && <View style={s.cameraNotice}><Text style={s.cameraNoticeText}>{c.offline}</Text></View>}
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filters}>
+      <Pressable style={[s.filter, projectId === null && s.filterActive]} onPress={() => setProjectId(null)}>
+        <Text style={projectId === null ? s.filterTextActive : s.filterText}>{c.all}</Text>
+      </Pressable>
+      {items.map((item) => <Pressable key={item.id} style={[s.filter, projectId === item.id && s.filterActive]} onPress={() => setProjectId(item.id)}>
+        <Text style={projectId === item.id ? s.filterTextActive : s.filterText} numberOfLines={1}>{item.name}</Text>
+      </Pressable>)}
+    </ScrollView>
+    {selectedProject && <View style={s.cameraCard}>
+      <View style={s.cameraPreview}><Text style={s.cameraPreviewIcon}>◉</Text><Text style={s.cameraWaiting}>{c.waiting}</Text></View>
+      <Text style={s.label}>{c.object}</Text>
+      <Text style={s.cardTitle}>{selectedProject.name}</Text>
+      <Text style={s.muted}>{selectedProject.address}</Text>
+    </View>}
+    <View style={s.emptyState}>
+      <Text style={s.emptyIcon}>◉</Text>
+      <Text style={s.cardTitle}>{c.noCameras}</Text>
+      <Text style={[s.muted, { textAlign: 'center', marginTop: 6 }]}>{c.noCamerasBody}</Text>
+    </View>
+  </View>;
+});
 
 function LoginScreen({ lang, api, onLogin }: { lang: Lang; api: ApiClient; onLogin: (session: Session) => void }) {
   const c = lang === "uz" ? { missing: "Ma'lumotlarni to'ldiring", missingBody: "Login va kamida 3 belgili parolni kiriting.", failed: "Kirish amalga oshmadi", connection: "Server bilan aloqani tekshiring.", invalidCredentials: "Login yoki parol noto'g'ri.", serverUnavailable: "Avtorizatsiya serveri mavjud emas.", title: "Kompaniyaga kirish", body: "Rol va obyektlarga kirishni administrator tayinlaydi.", username: "Login", password: "Parol", busy: "Kirilmoqda...", login: "Kirish" } : lang === "en" ? { missing: "Complete the fields", missingBody: "Enter a username and a password of at least 3 characters.", failed: "Sign in failed", connection: "Check the connection to the server.", invalidCredentials: "Incorrect username or password.", serverUnavailable: "The authentication server is unavailable.", title: "Company sign in", body: "Your administrator assigns your role and site access.", username: "Username", password: "Password", busy: "Signing in...", login: "Sign in" } : { missing: "Заполни данные", missingBody: "Укажи логин и пароль не короче 3 символов.", failed: "Не удалось войти", connection: "Проверь соединение с сервером.", invalidCredentials: "Неверный логин или пароль.", serverUnavailable: "Сервер авторизации недоступен.", title: "Вход в компанию", body: "Роль и доступ к объектам назначает администратор.", username: "Логин", password: "Пароль", busy: "Входим...", login: "Войти" };
@@ -606,7 +871,8 @@ function Dashboard({
   t,
   items,
   role,
-  taskCount,
+  tasks,
+  openSection,
   openProject,
   openQuick,
 }: {
@@ -614,12 +880,23 @@ function Dashboard({
   t: UiCopy;
   items: Project[];
   role: Role;
-  taskCount: number;
+  tasks: AppData['tasks'];
+  openSection: (section: "objects" | "tasks" | "quality") => void;
   openProject: (id: string) => void;
   openQuick: (action: QuickAction) => void;
 }) {
   const defects = items.reduce((n, p) => n + p.defectsOpen, 0);
   const delayed = items.filter((p) => p.risk !== "low").length;
+  const today = new Date().toISOString().slice(0, 10);
+  const activeTasks = tasks.filter((x) => x.status !== 'done');
+  const overdueTasks = activeTasks.filter((x) => x.due < today);
+  const reviewTasks = activeTasks.filter((x) => x.status === 'review');
+  const attention = [...overdueTasks, ...reviewTasks.filter((x) => !overdueTasks.some((item) => item.id === x.id))].slice(0, 3);
+  const home = lang === 'uz'
+    ? { active: 'Faol', overdue: "Muddati o'tgan", review: 'Tekshiruvda', attention: "E'tibor talab qiladi", calm: "Hozir shoshilinch vazifalar yo'q", open: 'Ochish', objects: 'Obyektlar' }
+    : lang === 'en'
+      ? { active: 'Active', overdue: 'Overdue', review: 'Awaiting review', attention: 'Needs attention', calm: 'No urgent tasks right now', open: 'Open', objects: 'Sites' }
+      : { active: 'Активные', overdue: 'Просроченные', review: 'Ждут проверки', attention: 'Требует внимания', calm: 'Сейчас нет срочных задач', open: 'Открыть', objects: 'Объекты' };
   const quick = lang === "uz" ? { title: "Tezkor amallar", photo: "Fotohisobot", violation: "Qoidabuzarlik", qr: "QR skaner", voice: "Ovozli jurnal" } : lang === "en" ? { title: "Quick actions", photo: "Photo report", violation: "Violation", qr: "QR scanner", voice: "Voice log" } : { title: "Быстрые действия", photo: "Фотоотчет", violation: "Нарушение", qr: "Сканер QR", voice: "Голосовой журнал" };
   const quickActions: [QuickAction, string, string][] = [];
   return (
@@ -629,11 +906,16 @@ function Dashboard({
         {role === "customer" ? items[0]?.name : t.portfolio}
       </Text>
       <View style={s.metrics}>
-        <Metric value={String(items.length)} label={t.objects} />
-        <Metric value={String(taskCount)} label={t.openTasks} />
-        <Metric value={String(defects)} label={t.defects} />
-        <Metric value={String(delayed)} label={t.delayed} bad={delayed > 0} />
+        <Metric value={String(items.length)} label={t.objects} onPress={() => openSection("objects")} />
+        <Metric value={String(activeTasks.length)} label={home.active} onPress={() => openSection("tasks")} />
+        <Metric value={String(overdueTasks.length)} label={home.overdue} bad={overdueTasks.length > 0} onPress={() => openSection("tasks")} />
+        <Metric value={String(reviewTasks.length)} label={home.review} onPress={() => openSection("tasks")} />
+        <Metric value={String(items.length)} label={home.objects} onPress={() => openSection("objects")} />
       </View>
+      <View style={s.sectionRow}><Text style={s.section}>{home.attention}</Text>{attention.length > 0 && <Pressable onPress={() => openSection('tasks')}><Text style={s.link}>{home.open} ›</Text></Pressable>}</View>
+      {attention.length === 0
+        ? <View style={s.emptyState}><Text style={s.emptyIcon}>✓</Text><Text style={s.cardTitle}>{home.calm}</Text></View>
+        : attention.map((task) => <Pressable key={task.id} style={[s.card, task.due < today && s.noticeDanger]} onPress={() => openSection('tasks')}><View style={s.row}><View style={s.flex}><Text style={s.cardTitle}>{task.title}</Text><Text style={s.muted}>{items.find((p) => p.id === task.projectId)?.name ?? task.stage}</Text></View><Text style={task.due < today ? s.bad : s.status}>{formatDate(task.due, lang)}</Text></View></Pressable>)}
       {quickActions.length > 0 && <><Text style={s.section}>{quick.title}</Text>
       <View style={s.quickGrid}>
         {quickActions.map(([action, icon, label]) => (
@@ -649,6 +931,8 @@ function Dashboard({
           key={p.id}
           item={p}
           t={t}
+          task={activeTasks.filter((x) => x.projectId === p.id).sort((a, b) => a.due.localeCompare(b.due))[0]}
+          lang={lang}
           onPress={() => openProject(p.id)}
         />
       ))}
@@ -656,34 +940,127 @@ function Dashboard({
   );
 }
 function ProjectList({
+  lang,
   t,
   items,
+  tasks,
+  api,
+  canCreate,
   open,
+  created,
 }: {
+  lang: Lang;
   t: UiCopy;
   items: Project[];
+  tasks: AppData['tasks'];
+  api: ApiClient | null;
+  canCreate: boolean;
   open: (id: string) => void;
+  created: () => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
-  const filtered = items.filter((x) => `${x.name} ${x.address}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const [sort, setSort] = useState<'attention' | 'progress' | 'deadline'>('attention');
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [templateCode, setTemplateCode] = useState<'high_rise' | 'typical_house' | 'renovation'>('typical_house');
+  const [creating, setCreating] = useState(false);
+  const c = lang === 'uz'
+    ? { add: "Yangi obyekt", title: "Obyekt yaratish", name: "Obyekt nomi", address: "Manzil", type: "Obyekt turi", create: "Yaratish", cancel: "Bekor qilish", required: "Obyekt nomini kiriting", error: "Obyekt yaratilmadi", loading: "Yaratilmoqda...", highRise: "Ko'p qavatli bino", typical: "Namunaviy uy", renovation: "Ta'mirlash", sendLocation: "Geolokatsiyani yuborish", locating: "Joy aniqlanmoqda...", locationReady: "Geolokatsiya biriktirildi", locationDenied: "Joylashuvga kirishga ruxsat berilmagan", locationError: "Geolokatsiyani aniqlab bo'lmadi" }
+    : lang === 'en'
+      ? { add: 'New site', title: 'Create site', name: 'Site name', address: 'Address', type: 'Site type', create: 'Create', cancel: 'Cancel', required: 'Enter a site name', error: 'Could not create site', loading: 'Creating...', highRise: 'High-rise building', typical: 'Typical house', renovation: 'Renovation', sendLocation: 'Send location', locating: 'Detecting location...', locationReady: 'Location attached', locationDenied: 'Location permission was not granted', locationError: 'Could not detect location' }
+      : { add: 'Новый объект', title: 'Создание объекта', name: 'Название объекта', address: 'Адрес', type: 'Тип объекта', create: 'Создать', cancel: 'Отмена', required: 'Введи название объекта', error: 'Не удалось создать объект', loading: 'Создаем...', highRise: 'Многоэтажный дом', typical: 'Типовой дом', renovation: 'Реконструкция', sendLocation: 'Отправить геопозицию', locating: 'Определяем геопозицию...', locationReady: 'Геопозиция прикреплена', locationDenied: 'Нет разрешения на доступ к геопозиции', locationError: 'Не удалось определить геопозицию' };
+  const templates = [
+    ['high_rise', c.highRise],
+    ['typical_house', c.typical],
+    ['renovation', c.renovation],
+  ] as const;
+  const captureLocation = async () => {
+    if (locating) return;
+    setLocating(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) return Alert.alert(c.title, c.locationDenied);
+      const point = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const next = { latitude: point.coords.latitude, longitude: point.coords.longitude };
+      setCoordinates(next);
+      if (!address.trim()) {
+        const [place] = await Location.reverseGeocodeAsync(next).catch(() => []);
+        const detectedAddress = [place?.street, place?.streetNumber, place?.district, place?.city, place?.region].filter(Boolean).join(', ');
+        if (detectedAddress) setAddress(detectedAddress);
+      }
+    } catch {
+      Alert.alert(c.title, c.locationError);
+    } finally {
+      setLocating(false);
+    }
+  };
+  const submit = async () => {
+    if (!name.trim()) return Alert.alert(c.title, c.required);
+    if (!api || creating) return;
+    setCreating(true);
+    try {
+      const response = await api.request('/api/objects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), address: address.trim() || undefined, latitude: coordinates?.latitude, longitude: coordinates?.longitude, templateCode }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(payload?.error === 'Insufficient permissions' ? 'Недостаточно прав для создания объекта.' : `HTTP ${response.status}`);
+      }
+      await created();
+      setName('');
+      setAddress('');
+      setCoordinates(null);
+      setTemplateCode('typical_house');
+      setShowCreate(false);
+    } catch (error) {
+      Alert.alert(c.error, error instanceof Error ? error.message : c.error);
+    } finally {
+      setCreating(false);
+    }
+  };
+  const listCopy = lang === 'uz' ? { sort: 'Saralash', attention: "E'tibor", progress: 'Jarayon', deadline: 'Muddat', emptyTitle: 'Obyektlar topilmadi', emptyBody: "Qidiruvni o'zgartiring yoki yangi obyekt yarating." } : lang === 'en' ? { sort: 'Sort', attention: 'Attention', progress: 'Progress', deadline: 'Deadline', emptyTitle: 'No sites found', emptyBody: 'Change the search or create a new site.' } : { sort: 'Сортировка', attention: 'По вниманию', progress: 'По прогрессу', deadline: 'По сроку', emptyTitle: 'Объекты не найдены', emptyBody: 'Измени поиск или создай новый объект.' };
+  const filtered = items.filter((x) => `${x.name} ${x.address}`.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => sort === 'progress' ? b.progress - a.progress : sort === 'deadline' ? a.deadline.split('.').reverse().join('').localeCompare(b.deadline.split('.').reverse().join('')) : ({ high: 0, medium: 1, low: 2 }[a.risk] - { high: 0, medium: 1, low: 2 }[b.risk]));
   return (
     <View>
       <Text style={s.h1}>{t.objects}</Text>
+      {canCreate && !showCreate && <Pressable style={s.primary} onPress={() => setShowCreate(true)}><Text style={s.primaryText}>+ {c.add}</Text></Pressable>}
+      {canCreate && showCreate && <View style={s.card}>
+        <Text style={s.cardTitle}>{c.title}</Text>
+        <TextInput value={name} onChangeText={setName} placeholder={c.name} maxLength={200} style={s.field} />
+        <TextInput value={address} onChangeText={setAddress} placeholder={c.address} maxLength={300} style={s.field} />
+        <Pressable disabled={creating || locating} style={s.outline} onPress={() => void captureLocation()}><Text style={s.outlineText}>{locating ? c.locating : c.sendLocation}</Text></Pressable>
+        {coordinates && <><Text style={s.muted}>{c.locationReady}: {coordinates.latitude.toFixed(6)}, {coordinates.longitude.toFixed(6)}</Text><GeoPoint lang={lang} latitude={coordinates.latitude} longitude={coordinates.longitude} /></>}
+        <Text style={s.label}>{c.type}</Text>
+        {templates.map(([code, label]) => <Pressable key={code} disabled={creating} style={templateCode === code ? s.primary : s.outlineInline} onPress={() => setTemplateCode(code)}><Text style={templateCode === code ? s.primaryText : s.outlineText}>{label}</Text></Pressable>)}
+        <Pressable disabled={creating} style={[s.primary, creating && s.disabled]} onPress={() => void submit()}><Text style={s.primaryText}>{creating ? c.loading : c.create}</Text></Pressable>
+        <Pressable disabled={creating} style={s.outline} onPress={() => { setShowCreate(false); setCoordinates(null); }}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
+      </View>}
       <TextInput value={query} onChangeText={setQuery} placeholder={t.searchObject} style={s.search} />
+      <Text style={s.label}>{listCopy.sort}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filters}>{(['attention', 'progress', 'deadline'] as const).map((value) => <Pressable key={value} style={[s.filter, sort === value && s.filterActive]} onPress={() => setSort(value)}><Text style={sort === value ? s.filterTextActive : s.filterText}>{listCopy[value]}</Text></Pressable>)}</ScrollView>
       {filtered.map((p) => (
-        <ProjectCard key={p.id} item={p} t={t} onPress={() => open(p.id)} />
+        <ProjectCard key={p.id} item={p} t={t} task={tasks.filter((x) => x.projectId === p.id && x.status !== 'done').sort((a, b) => a.due.localeCompare(b.due))[0]} lang={lang} onPress={() => open(p.id)} />
       ))}
-      {filtered.length === 0 && <Text style={s.muted}>{t.nothingFound}</Text>}
+      {filtered.length === 0 && <View style={s.emptyState}><Text style={s.emptyIcon}>⌕</Text><Text style={s.cardTitle}>{listCopy.emptyTitle}</Text><Text style={s.muted}>{listCopy.emptyBody}</Text></View>}
     </View>
   );
 }
 function ProjectCard({
   item,
   t,
+  task,
+  lang,
   onPress,
 }: {
   item: Project;
   t: UiCopy;
+  task?: AppData['tasks'][number];
+  lang: Lang;
   onPress: () => void;
 }) {
   return (
@@ -710,6 +1087,7 @@ function ProjectCard({
               : "OK"}
         </Text>
       </View>
+      {task && <View style={s.projectMeta}><View style={s.flex}><Text style={s.label}>{lang === 'uz' ? 'Masʼul' : lang === 'en' ? 'Responsible' : 'Ответственный'}</Text><Text style={s.projectMetaValue}>{task.assignee || '-'}</Text></View><View style={s.flex}><Text style={s.label}>{lang === 'uz' ? 'Eng yaqin muddat' : lang === 'en' ? 'Nearest deadline' : 'Ближайший срок'}</Text><Text style={s.projectMetaValue}>{formatDate(task.due, lang)}</Text></View></View>}
       <View style={s.progressBg}>
         <View style={[s.progressFill, { width: `${item.progress}%` }]} />
       </View>
@@ -728,10 +1106,12 @@ function ProjectDetails({
   item,
   t,
   back,
+  openTasks,
 }: {
   item: Project;
   t: UiCopy;
   back: () => void;
+  openTasks: () => void;
 }) {
   return (
     <View>
@@ -750,29 +1130,88 @@ function ProjectDetails({
       <View style={s.card}>
         <Line k={t.deadline} v={item.deadline} />
         <Line k={t.forecast} v={item.forecast} bad={item.risk !== "low"} />
-        <Line k={t.openTasks} v={String(item.tasksOpen)} />
+        <Pressable
+          style={({ pressed }) => [s.line, pressed && s.detailLinkPressed]}
+          onPress={openTasks}
+          accessibilityRole="link"
+          accessibilityLabel={`${t.openTasks}: ${item.tasksOpen}`}
+        >
+          <Text style={s.link}>{t.openTasks}</Text>
+          <Text style={s.detailLinkValue}>{item.tasksOpen}  ›</Text>
+        </Pressable>
         <Line k={t.defects} v={String(item.defectsOpen)} />
       </View>
     </View>
   );
 }
-function DateFields({ value, onChange, label, clearLabel }: { value: string; onChange: (value: string) => void; label: string; clearLabel: string }) {
-  const inputRef = useRef<TextInput>(null);
+function DateFields({ value, onChange, label, clearLabel, lang, time, onTimeChange }: { value: string; onChange: (value: string) => void; label: string; clearLabel: string; lang?: Lang; time?: string; onTimeChange?: (value: string) => void }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const parsed = dateInputToIso(value);
+  const initialMonth = parsed ? new Date(`${parsed}T00:00:00`) : today;
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [month, setMonth] = useState(new Date(initialMonth.getFullYear(), initialMonth.getMonth(), 1));
+  const copy = lang === 'uz'
+    ? { choose: 'Sanani tanlang', today: 'Bugun', done: 'Tayyor', endOfDay: 'Kun oxirigacha', time: 'Vaqt' }
+    : lang === 'en'
+      ? { choose: 'Choose date', today: 'Today', done: 'Done', endOfDay: 'End of day', time: 'Time' }
+      : { choose: 'Выберите дату', today: 'Сегодня', done: 'Готово', endOfDay: 'До конца дня', time: 'Время' };
+  const locale = lang === 'uz' ? 'uz-UZ' : lang === 'en' ? 'en-US' : 'ru-RU';
+  const weekdays = lang === 'uz' ? ['Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sh', 'Ya'] : lang === 'en' ? ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'] : ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const firstWeekday = (month.getDay() + 6) % 7;
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells = Array.from({ length: 42 }, (_, index) => {
+    const day = index - firstWeekday + 1;
+    return day > 0 && day <= daysInMonth ? new Date(month.getFullYear(), month.getMonth(), day) : null;
+  });
+  const selectedKey = parsed ?? '';
+  const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const selectDate = (date: Date) => {
+    if (date < today) return;
+    onChange(`${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`);
+  };
   return <View style={s.dateBlock}>
     <View style={s.row}>
       <Text style={[s.label, s.flex]}>{label}</Text>
-      {!!value && <Pressable onPress={() => { onChange(''); inputRef.current?.focus(); }}><Text style={s.link}>{clearLabel}</Text></Pressable>}
+      {!!value && <Pressable onPress={() => onChange('')}><Text style={s.link}>{clearLabel}</Text></Pressable>}
     </View>
-    <TextInput
-      ref={inputRef}
-      value={value}
-      onChangeText={(text) => onChange(formatDateInput(text))}
-      placeholder="ДД.ММ.ГГГГ"
-      keyboardType="number-pad"
-      maxLength={10}
-      selectTextOnFocus={false}
-      style={s.field}
-    />
+    <Pressable style={s.field} onPress={() => { setMonth(new Date(initialMonth.getFullYear(), initialMonth.getMonth(), 1)); setCalendarOpen(true); }}>
+      <Text style={value ? s.dateValue : s.datePlaceholder}>{value || 'ДД.ММ.ГГГГ'}{value && time ? `, ${time}` : ''}</Text>
+    </Pressable>
+    <Modal visible={calendarOpen} transparent animationType="fade" onRequestClose={() => setCalendarOpen(false)}>
+      <View style={s.calendarOverlay}>
+        <View style={s.calendarCard}>
+          <Text style={s.cardTitle}>{copy.choose}</Text>
+          <View style={s.calendarHeader}>
+            <Pressable style={s.calendarArrow} onPress={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><Text style={s.calendarArrowText}>‹</Text></Pressable>
+            <Text style={s.calendarMonth}>{new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(month)}</Text>
+            <Pressable style={s.calendarArrow} onPress={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><Text style={s.calendarArrowText}>›</Text></Pressable>
+          </View>
+          <View style={s.calendarGrid}>
+            {weekdays.map((day) => <Text key={day} style={s.calendarWeekday}>{day}</Text>)}
+            {cells.map((date, index) => {
+              if (!date) return <View key={`blank-${index}`} style={s.calendarDay} />;
+              const key = dateKey(date);
+              const disabled = date < today;
+              const selected = key === selectedKey;
+              const isToday = key === dateKey(today);
+              return <Pressable key={key} disabled={disabled} style={[s.calendarDay, selected && s.calendarDaySelected, isToday && !selected && s.calendarDayToday]} onPress={() => selectDate(date)}>
+                <Text style={[s.calendarDayText, disabled && s.calendarDayDisabled, selected && s.calendarDayTextSelected]}>{date.getDate()}</Text>
+              </Pressable>;
+            })}
+          </View>
+          {onTimeChange && <View style={s.calendarTimeRow}>
+            <Text style={s.label}>{copy.time}</Text>
+            <TextInput value={time} onChangeText={(text) => onTimeChange(text.replace(/[^0-9:]/g, '').slice(0, 5))} placeholder="18:00" keyboardType="numbers-and-punctuation" maxLength={5} style={s.timeField} />
+            <Pressable style={time === '23:59' ? s.primary : s.outlineInline} onPress={() => onTimeChange('23:59')}><Text style={time === '23:59' ? s.primaryText : s.outlineText}>{copy.endOfDay}</Text></Pressable>
+          </View>}
+          <View style={s.actionRow}>
+            <Pressable style={[s.outlineInline, s.action]} onPress={() => { selectDate(today); setMonth(new Date(today.getFullYear(), today.getMonth(), 1)); }}><Text style={s.outlineText}>{copy.today}</Text></Pressable>
+            <Pressable style={[s.primary, s.action]} onPress={() => setCalendarOpen(false)}><Text style={s.primaryText}>{copy.done}</Text></Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   </View>;
 }
 
@@ -780,7 +1219,6 @@ function TasksScreen({
   t,
   lang,
   role,
-  accessToken,
   api,
   data,
   updateData,
@@ -790,7 +1228,6 @@ function TasksScreen({
   t: UiCopy;
   lang: Lang;
   role: Role;
-  accessToken?: string;
   api: ApiClient | null;
   data: AppData;
   updateData: (d: AppData) => void;
@@ -801,7 +1238,9 @@ function TasksScreen({
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [reviewNote, setReviewNote] = useState("");
+  const [inspectorChecks, setInspectorChecks] = useState<boolean[]>([false, false, false]);
   const [draftPhotos, setDraftPhotos] = useState<string[]>([]);
+  const [submittingPhotos, setSubmittingPhotos] = useState(false);
   const [assigningReviewer, setAssigningReviewer] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -809,9 +1248,11 @@ function TasksScreen({
   const [createProjectId, setCreateProjectId] = useState("");
   const [createSectionId, setCreateSectionId] = useState("");
   const [createAssigneeId, setCreateAssigneeId] = useState("");
+  const [createReviewerId, setCreateReviewerId] = useState("");
   const [createPriority, setCreatePriority] = useState<'low' | 'normal' | 'high'>('normal');
   const [createDeadline, setCreateDeadline] = useState("");
-  const [createChecklist, setCreateChecklist] = useState("");
+  const [createDeadlineTime, setCreateDeadlineTime] = useState("23:59");
+  const [createChecklistItems, setCreateChecklistItems] = useState<string[]>([""]);
   const [planningUsers, setPlanningUsers] = useState<PlanningUser[]>([]);
   const [planningSections, setPlanningSections] = useState<PlanningSection[]>([]);
   const [editing, setEditing] = useState(false);
@@ -819,6 +1260,7 @@ function TasksScreen({
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editAssigneeId, setEditAssigneeId] = useState("");
+  const [editReviewerId, setEditReviewerId] = useState("");
   const [editPriority, setEditPriority] = useState<'low' | 'normal' | 'high'>('normal');
   const [editDeadline, setEditDeadline] = useState("");
   const [editChecklist, setEditChecklist] = useState("");
@@ -828,15 +1270,40 @@ function TasksScreen({
   const items = allowed.filter((x) => (filter === "all" || x.status === filter) && `${x.title} ${x.stage} ${x.assignee}`.toLowerCase().includes(query.trim().toLowerCase()));
   const task = data.tasks.find((x) => x.id === selected);
   const c = lang === "uz"
-    ? { assignError: "Texnik nazoratchini tayinlab bo'lmadi", serverError: "Server xatosi", search: "Vazifa, bosqich yoki ijrochi bo'yicha qidirish", empty: "Filtr bo'yicha vazifalar yo'q", newTask: "Vazifa qo'yish", title: "Vazifa nomi", chooseObject: "Obyektni tanlang", chooseSection: "Ish bo'limini tanlang", chooseAssignee: "Ijrochini tanlang", noAssignee: "Tayinlanmagan", deadlineHint: "Muddat", clearDate: "Tozalash", create: "Vazifa yaratish", cancel: "Bekor qilish", created: "Vazifa yaratildi", createError: "Vazifani yaratib bo'lmadi", required: "Nom, obyekt va bo'limni to'ldiring", loading: "Ma'lumotlar yuklanmoqda...", priority: "Ustuvorlik" }
+    ? { assignError: "Tekshiruvchini tayinlab bo'lmadi", serverError: "Server xatosi", search: "Vazifa, bosqich yoki ijrochi bo'yicha qidirish", empty: "Filtr bo'yicha vazifalar yo'q", newTask: "Vazifa qo'yish", title: "Vazifa nomi", chooseObject: "Obyektni tanlang", chooseSection: "Ish bo'limini tanlang", chooseAssignee: "Ijrochini tanlang", chooseReviewer: "Tekshiruvchi (ixtiyoriy)", noAssignee: "Tayinlanmagan", noReviewer: "Tekshiruvchisiz", deadlineHint: "Muddat", clearDate: "Tozalash", create: "Vazifa yaratish", cancel: "Bekor qilish", created: "Vazifa yaratildi", createError: "Vazifani yaratib bo'lmadi", required: "Nom, obyekt va bo'limni to'ldiring", sameUser: "Ijrochi va tekshiruvchi turli xodimlar bo'lishi kerak", loading: "Ma'lumotlar yuklanmoqda...", priority: "Ustuvorlik" }
     : lang === "en"
-      ? { assignError: "Could not assign inspector", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter", newTask: "Create task", title: "Task title", chooseObject: "Choose an object", chooseSection: "Choose a work section", chooseAssignee: "Choose an assignee", noAssignee: "Unassigned", deadlineHint: "Deadline", clearDate: "Clear", create: "Create task", cancel: "Cancel", created: "Task created", createError: "Could not create task", required: "Enter a title, object and section", loading: "Loading data...", priority: "Priority" }
-      : { assignError: "Не удалось назначить технадзор", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет", newTask: "Поставить задачу", title: "Название задачи", chooseObject: "Выберите объект", chooseSection: "Выберите раздел работ", chooseAssignee: "Выберите исполнителя", noAssignee: "Не назначен", deadlineHint: "Срок", clearDate: "Очистить", create: "Создать задачу", cancel: "Отмена", created: "Задача создана", createError: "Не удалось создать задачу", required: "Заполните название, объект и раздел", loading: "Загружаем данные...", priority: "Приоритет" };
+      ? { assignError: "Could not assign reviewer", serverError: "Server error", search: "Search by task, stage, or assignee", empty: "No tasks match this filter", newTask: "Create task", title: "Task title", chooseObject: "Choose an object", chooseSection: "Choose a work section", chooseAssignee: "Choose an assignee", chooseReviewer: "Reviewer (optional)", noAssignee: "Unassigned", noReviewer: "No reviewer", deadlineHint: "Deadline", clearDate: "Clear", create: "Create task", cancel: "Cancel", created: "Task created", createError: "Could not create task", required: "Enter a title, object and section", sameUser: "Assignee and reviewer must be different users", loading: "Loading data...", priority: "Priority" }
+      : { assignError: "Не удалось назначить проверяющего", serverError: "Ошибка сервера", search: "Поиск по задаче, этапу или исполнителю", empty: "Задач по фильтру нет", newTask: "Поставить задачу", title: "Название задачи", chooseObject: "Выберите объект", chooseSection: "Выберите раздел работ", chooseAssignee: "Выберите исполнителя", chooseReviewer: "Проверяющий (необязательно)", noAssignee: "Не назначен", noReviewer: "Без проверяющего", deadlineHint: "Срок", clearDate: "Очистить", create: "Создать задачу", cancel: "Отмена", created: "Задача создана", createError: "Не удалось создать задачу", required: "Заполните название, объект и раздел", sameUser: "Исполнитель и проверяющий должны быть разными сотрудниками", loading: "Загружаем данные...", priority: "Приоритет" };
   const extra = lang === 'uz'
-    ? { description: "Tavsif", checklist: "Tekshiruv ro'yxati - har bir band yangi qatordan", edit: "Vazifani tahrirlash", save: "O'zgarishlarni saqlash", saved: "Vazifa yangilandi", saveError: "O'zgarishlarni saqlab bo'lmadi", invalidDate: "Sanani DD.MM.YYYY formatida kiriting" }
+    ? { description: "Tavsif", checklist: "Tekshiruv ro'yxati", checklistItem: "Band matni", addChecklistItem: "Band qo'shish", removeChecklistItem: "Bandni o'chirish", moveUp: "Yuqoriga", moveDown: "Pastga", edit: "Vazifani tahrirlash", save: "O'zgarishlarni saqlash", saved: "Vazifa yangilandi", saveError: "O'zgarishlarni saqlab bo'lmadi", invalidDate: "Sanani DD.MM.YYYY formatida kiriting" }
     : lang === 'en'
-      ? { description: 'Description', checklist: 'Checklist - one item per line', edit: 'Edit task', save: 'Save changes', saved: 'Task updated', saveError: 'Could not save changes', invalidDate: 'Enter a valid date as DD.MM.YYYY' }
-      : { description: 'Описание', checklist: 'Чек-лист - каждый пункт с новой строки', edit: 'Редактировать задачу', save: 'Сохранить изменения', saved: 'Задача обновлена', saveError: 'Не удалось сохранить изменения', invalidDate: 'Укажи корректную дату в формате ДД.ММ.ГГГГ' };
+      ? { description: 'Description', checklist: 'Checklist', checklistItem: 'Checklist item', addChecklistItem: 'Add item', removeChecklistItem: 'Remove item', moveUp: 'Move up', moveDown: 'Move down', edit: 'Edit task', save: 'Save changes', saved: 'Task updated', saveError: 'Could not save changes', invalidDate: 'Enter a valid date as DD.MM.YYYY' }
+      : { description: 'Описание', checklist: 'Чек-лист', checklistItem: 'Текст пункта', addChecklistItem: 'Добавить пункт', removeChecklistItem: 'Удалить пункт', moveUp: 'Поднять', moveDown: 'Опустить', edit: 'Редактировать задачу', save: 'Сохранить изменения', saved: 'Задача обновлена', saveError: 'Не удалось сохранить изменения', invalidDate: 'Укажи корректную дату в формате ДД.ММ.ГГГГ' };
+  const detailCopy = lang === 'uz'
+    ? { progress: "Bajarilish", required: "Majburiy", photos: "Bajarilgan ish fotosi", addPhoto: "Bajarilgan ish fotosini qo'shing", ready: "Yuborishga tayyor", uploaded: "Yuklandi", sending: "Yuborilmoqda...", mainAction: "Asosiy amal", dangerActions: "Rad etish va xavfli amallar" }
+    : lang === 'en'
+      ? { progress: 'Progress', required: 'Required', photos: 'Completion photos', addPhoto: 'Add completion photos', ready: 'Ready to send', uploaded: 'Uploaded', sending: 'Sending...', mainAction: 'Main action', dangerActions: 'Rejection and destructive actions' }
+      : { progress: 'Выполнение', required: 'Обязательный', photos: 'Фото выполнения', addPhoto: 'Добавьте фото выполнения', ready: 'Готово к отправке', uploaded: 'Загружено', sending: 'Отправляем...', mainAction: 'Главное действие', dangerActions: 'Отклонение и опасные действия' };
+
+  const updateCreateChecklistItem = (index: number, value: string) => {
+    setCreateChecklistItems((items) => items.map((item, itemIndex) => itemIndex === index ? value : item));
+  };
+  const removeCreateChecklistItem = (index: number) => {
+    setCreateChecklistItems((items) => items.length === 1 ? [''] : items.filter((_, itemIndex) => itemIndex !== index));
+  };
+  const moveCreateChecklistItem = (index: number, direction: -1 | 1) => {
+    setCreateChecklistItems((items) => {
+      const target = index + direction;
+      if (target < 0 || target >= items.length) return items;
+      const next = [...items];
+      const currentItem = next[index];
+      const targetItem = next[target];
+      if (currentItem === undefined || targetItem === undefined) return items;
+      next[index] = targetItem;
+      next[target] = currentItem;
+      return next;
+    });
+  };
 
   const loadPlanning = async (project: string) => {
     if (!api || !project) return;
@@ -856,6 +1323,20 @@ function TasksScreen({
     }
   };
 
+  const requestForTaskMutation = async (path: string, init: RequestInit = {}) => {
+    if (!api) throw new Error(c.serverError);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      return await api.request(path, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(lang === 'uz' ? "Server javob bermadi. Qayta urinib ko'ring" : lang === 'en' ? 'The server did not respond. Try again' : 'Сервер не ответил. Попробуй еще раз');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   const openCreate = () => {
     const firstProject = data.projects[0]?.id ?? '';
     setCreateProjectId(firstProject);
@@ -866,13 +1347,14 @@ function TasksScreen({
   const submitTask = async () => {
     if (!api || creating) return;
     if (!createTitle.trim() || !createProjectId || !createSectionId) return Alert.alert(c.createError, c.required);
-    const plannedEnd = createDeadline ? dateInputToIso(createDeadline) : undefined;
+    if (createReviewerId && createReviewerId === createAssigneeId) return Alert.alert(c.createError, c.sameUser);
+    const plannedEnd = createDeadline ? dateInputToDeadlineIso(createDeadline, createDeadlineTime) : undefined;
     if (createDeadline && !plannedEnd) return Alert.alert(c.createError, extra.invalidDate);
     setCreating(true);
     try {
-      const response = await api.request(`/api/objects/sections/${encodeURIComponent(createSectionId)}/tasks`, {
+      const response = await requestForTaskMutation(`/api/objects/sections/${encodeURIComponent(createSectionId)}/tasks`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'idempotency-key': asciiIdempotencyKey('mobile-task', createSectionId, createTitle.trim(), plannedEnd ?? '') },
         body: JSON.stringify({
           title: createTitle.trim(),
           assigneeId: createAssigneeId || null,
@@ -883,13 +1365,18 @@ function TasksScreen({
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const created = await response.json() as { id: string };
-      for (const label of createChecklist.split('\n').map((item) => item.trim()).filter(Boolean)) {
-        const checklistResponse = await api.request(`/api/tasks/${encodeURIComponent(created.id)}/checklist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label }) });
-        if (!checklistResponse.ok) throw new Error(`Checklist HTTP ${checklistResponse.status}`);
+      if (createReviewerId) {
+        const reviewerResponse = await requestForTaskMutation(`/api/tasks/${encodeURIComponent(created.id)}/reviewer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reviewerId: createReviewerId }) });
+        if (!reviewerResponse.ok) throw new Error(`Reviewer HTTP ${reviewerResponse.status}`);
       }
-      updateData(await refreshServerData(data, api, lang));
-      setCreateTitle(''); setCreateAssigneeId(''); setCreateDeadline(''); setCreateChecklist(''); setCreatePriority('normal'); setShowCreate(false);
+      const checklistResponses = await Promise.all(createChecklistItems.map((item) => item.trim()).filter(Boolean).map((label) =>
+        requestForTaskMutation(`/api/tasks/${encodeURIComponent(created.id)}/checklist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label }) }),
+      ));
+      const failedChecklistResponse = checklistResponses.find((item) => !item.ok);
+      if (failedChecklistResponse) throw new Error(`Checklist HTTP ${failedChecklistResponse.status}`);
+      setCreateTitle(''); setCreateAssigneeId(''); setCreateReviewerId(''); setCreateDeadline(''); setCreateDeadlineTime('23:59'); setCreateChecklistItems(['']); setCreatePriority('normal'); setShowCreate(false);
       Alert.alert(c.created);
+      void refreshServerData(data, api, lang).then(updateData).catch(() => undefined);
     } catch (error) {
       Alert.alert(c.createError, error instanceof Error ? error.message : c.serverError);
     } finally { setCreating(false); }
@@ -897,24 +1384,31 @@ function TasksScreen({
 
   const beginEdit = () => {
     if (!task) return;
-    setEditTitle(task.title); setEditDescription(task.description ?? ''); setEditAssigneeId(task.assigneeId ?? '');
+    setEditTitle(task.title); setEditDescription(task.description ?? ''); setEditAssigneeId(task.assigneeId ?? ''); setEditReviewerId(task.reviewerId ?? '');
     setEditPriority(task.priority === 'medium' ? 'normal' : task.priority); setEditDeadline(isoToDateInput(task.due)); setEditChecklist(''); setEditing(true);
     if (!planningUsers.length && api) void api.request('/api/planning/users').then(async (response) => { if (response.ok) setPlanningUsers(await response.json() as PlanningUser[]); });
   };
 
   const saveEdit = async () => {
     if (!task || !api || savingEdit || !editTitle.trim()) return;
+    if (editReviewerId && editReviewerId === editAssigneeId) return Alert.alert(extra.saveError, c.sameUser);
     const plannedEnd = editDeadline ? dateInputToIso(editDeadline) : null;
     if (editDeadline && !plannedEnd) return Alert.alert(extra.saveError, extra.invalidDate);
     setSavingEdit(true);
     try {
-      const response = await api.request(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: editTitle.trim(), description: editDescription.trim(), assigneeId: editAssigneeId || null, priority: editPriority, plannedEnd }) });
+      const response = await requestForTaskMutation(`/api/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: editTitle.trim(), description: editDescription.trim(), assigneeId: editAssigneeId || null, priority: editPriority, plannedEnd }) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      for (const label of editChecklist.split('\n').map((item) => item.trim()).filter(Boolean)) {
-        const checklistResponse = await api.request(`/api/tasks/${encodeURIComponent(task.id)}/checklist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label }) });
-        if (!checklistResponse.ok) throw new Error(`Checklist HTTP ${checklistResponse.status}`);
+      if (editReviewerId && editReviewerId !== task.reviewerId) {
+        const reviewerResponse = await requestForTaskMutation(`/api/tasks/${encodeURIComponent(task.id)}/reviewer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reviewerId: editReviewerId }) });
+        if (!reviewerResponse.ok) throw new Error(`Reviewer HTTP ${reviewerResponse.status}`);
       }
-      updateData(await refreshServerData(data, api, lang)); setEditing(false); Alert.alert(extra.saved);
+      const checklistResponses = await Promise.all(editChecklist.split('\n').map((item) => item.trim()).filter(Boolean).map((label) =>
+        requestForTaskMutation(`/api/tasks/${encodeURIComponent(task.id)}/checklist`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label }) }),
+      ));
+      const failedChecklistResponse = checklistResponses.find((item) => !item.ok);
+      if (failedChecklistResponse) throw new Error(`Checklist HTTP ${failedChecklistResponse.status}`);
+      setEditing(false); Alert.alert(extra.saved);
+      void refreshServerData(data, api, lang).then(updateData).catch(() => undefined);
     } catch (error) { Alert.alert(extra.saveError, error instanceof Error ? error.message : c.serverError); }
     finally { setSavingEdit(false); }
   };
@@ -942,7 +1436,7 @@ function TasksScreen({
     } finally { setAssigningReviewer(false); }
   };
   useEffect(() => { if (initialSelected) setSelected(initialSelected); }, [initialSelected]);
-  useEffect(() => { setDraftPhotos([]); }, [selected]);
+  useEffect(() => { setDraftPhotos([]); setInspectorChecks([false, false, false]); }, [selected]);
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
@@ -993,24 +1487,21 @@ function TasksScreen({
     setDraftPhotos((current) => [...current, asset.uri].slice(0, 10));
   };
   const submitPhotos = async () => {
-    if (!task) return;
+    if (!task || submittingPhotos) return;
     if (!draftPhotos.length) return Alert.alert(t.attachedPhotos, t.photoRequired);
-    const geo = await Location.requestForegroundPermissionsAsync();
-    if (!geo.granted) return Alert.alert(t.permissionsNeeded, t.permissionsBody);
-    const point = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.High,
-    });
-    updateData(
-      closeTask(
-        data,
-        task.id,
-        draftPhotos,
-        point.coords.latitude,
-        point.coords.longitude,
-      ),
-    );
-    setDraftPhotos([]);
-    Alert.alert(t.sentForReview, t.savedOffline);
+    setSubmittingPhotos(true);
+    try {
+      const geo = await Location.requestForegroundPermissionsAsync();
+      if (!geo.granted) return Alert.alert(t.permissionsNeeded, t.permissionsBody);
+      const point = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      updateData(closeTask(data, task.id, draftPhotos, point.coords.latitude, point.coords.longitude));
+      setDraftPhotos([]);
+      Alert.alert(t.sentForReview, t.savedOffline);
+    } catch (error) {
+      Alert.alert(t.attachedPhotos, error instanceof Error ? error.message : c.serverError);
+    } finally {
+      setSubmittingPhotos(false);
+    }
   };
   if (task)
     return (
@@ -1028,14 +1519,21 @@ function TasksScreen({
           <Text style={s.label}>{c.chooseAssignee}</Text>
           <Pressable style={!editAssigneeId ? s.primary : s.outlineInline} onPress={() => setEditAssigneeId('')}><Text style={!editAssigneeId ? s.primaryText : s.outlineText}>{c.noAssignee}</Text></Pressable>
           {planningUsers.map((user) => <Pressable key={user.id} style={user.id === editAssigneeId ? s.primary : s.outlineInline} onPress={() => setEditAssigneeId(user.id)}><Text style={user.id === editAssigneeId ? s.primaryText : s.outlineText}>{user.fullName}</Text></Pressable>)}
+          <Text style={s.label}>{c.chooseReviewer}</Text>
+          {data.reviewers.filter((reviewer) => (reviewer.objectIds.length === 0 || reviewer.objectIds.includes(task.projectId)) && reviewer.id !== editAssigneeId).map((reviewer) => <Pressable key={reviewer.id} style={reviewer.id === editReviewerId ? s.primary : s.outlineInline} onPress={() => setEditReviewerId(reviewer.id)}><Text style={reviewer.id === editReviewerId ? s.primaryText : s.outlineText}>{reviewer.name}</Text></Pressable>)}
+          {data.reviewers.filter((reviewer) => reviewer.objectIds.length === 0 || reviewer.objectIds.includes(task.projectId)).length === 0 && <Text style={s.muted}>{t.noInspectors}</Text>}
           <Text style={s.label}>{c.priority}</Text>
           <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === editPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setEditPriority(priority)}><Text style={priority === editPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
-          <DateFields value={editDeadline} onChange={setEditDeadline} label={c.deadlineHint} clearLabel={c.clearDate} />
+          <DateFields value={editDeadline} onChange={setEditDeadline} label={c.deadlineHint} clearLabel={c.clearDate} lang={lang} />
           <TextInput value={editChecklist} onChangeText={setEditChecklist} placeholder={extra.checklist} multiline style={s.input} />
           <Pressable disabled={savingEdit} style={s.primary} onPress={() => void saveEdit()}><Text style={s.primaryText}>{savingEdit ? c.loading : extra.save}</Text></Pressable>
           <Pressable disabled={savingEdit} style={s.outline} onPress={() => setEditing(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
         </View>}
-        <View style={s.card}>
+        <View style={s.taskSummary}>
+          <View style={s.taskTitleRow}>
+            <Text style={[s.taskStatus, s[`taskStatus_${task.status}`]]}>{labels[task.status]}</Text>
+            <Text style={s.taskSummaryDue}>{t.deadline}: {task.due}</Text>
+          </View>
           <Line
             k={t.object}
             v={data.projects.find((p) => p.id === task.projectId)?.name ?? "-"}
@@ -1043,7 +1541,6 @@ function TasksScreen({
           <Line k={t.stage} v={task.stage} />
           {!!task.description && <Line k={extra.description} v={task.description} />}
           <Line k={t.responsible} v={task.assignee} />
-          <Line k={t.deadline} v={task.due} />
           <Line
             k={t.priority}
             v={
@@ -1055,26 +1552,25 @@ function TasksScreen({
             }
             bad={task.priority === "high"}
           />
-          <Line k={t.status} v={labels[task.status]} />
         </View>
-        <Text style={s.section}>{t.checklist}</Text>
+        <View style={s.sectionRow}><Text style={s.section}>{t.checklist}</Text><Text style={s.progressBadge}>{detailCopy.progress}: {task.checklist.filter((x) => x.done).length}/{task.checklist.length}</Text></View>
         {task.checklist.map((x) => (
           <Pressable
             key={x.id}
-            style={s.check}
+            style={[s.check, x.done && s.checkCompleted]}
             disabled={task.status === 'review' || task.status === 'done' || !['foreman', 'subcontractor', 'pm', 'admin', 'director'].includes(role)}
             onPress={() => void toggleChecklist(x.id, !x.done)}
           >
             <Text style={[s.checkBox, x.done && s.checkDone]}>
               {x.done ? "✓" : ""}
             </Text>
-            <Text style={[s.flex, x.done && s.strike]}>{x.text}</Text>
+            <View style={s.flex}><Text style={x.done && s.strike}>{x.text}</Text>{!x.done && <Text style={s.requiredHint}>{detailCopy.required}</Text>}</View>
           </Pressable>
         ))}
         {(task.photoUris?.length || task.photoUri) && (
           <View style={s.card}>
-            <Text style={s.cardTitle}>{t.attachedPhotos}</Text>
-            {(task.photoUris?.length ? task.photoUris : [task.photoUri!]).map((uri, index) => <PhotoViewer key={`${uri}:${index}`} uri={uri} compact headers={accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined} />)}
+            <View style={s.sectionRow}><Text style={s.cardTitle}>{detailCopy.photos}</Text><Text style={s.successBadge}>✓ {detailCopy.uploaded}</Text></View>
+            {(task.photoUris?.length ? task.photoUris : [task.photoUri!]).map((uri, index) => <PhotoViewer key={`${uri}:${index}`} uri={uri} compact api={api} />)}
             <GeoPoint lang={lang} latitude={task.latitude} longitude={task.longitude} />
           </View>
         )}
@@ -1092,30 +1588,43 @@ function TasksScreen({
         )}
         {['foreman', 'subcontractor', 'pm', 'admin', 'director'].includes(role) && task.status !== "review" && task.status !== "done" && (
           <View style={s.card}>
-            {!!draftPhotos.length && <Text style={s.cardTitle}>{t.attachedPhotos}: {draftPhotos.length}/10</Text>}
-            {draftPhotos.map((uri, index) => <View key={`${uri}:${index}`}><PhotoViewer uri={uri} compact /><Pressable style={s.outlineInline} onPress={() => setDraftPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))}><Text style={s.outlineText}>{t.removePhoto}</Text></Pressable></View>)}
+            <View style={s.sectionRow}><Text style={s.cardTitle}>{detailCopy.photos}</Text>{!!draftPhotos.length && <Text style={s.successBadge}>✓ {detailCopy.ready}: {draftPhotos.length}/10</Text>}</View>
+            {!draftPhotos.length && <View style={s.photoEmpty}><Text style={s.photoEmptyIcon}>＋</Text><Text style={s.photoEmptyText}>{detailCopy.addPhoto}</Text></View>}
+            {draftPhotos.map((uri, index) => <View key={`${uri}:${index}`}><PhotoViewer uri={uri} compact /><Pressable style={s.dangerInline} onPress={() => setDraftPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))}><Text style={s.dangerText}>{t.removePhoto}</Text></Pressable></View>)}
             <Pressable style={s.outline} onPress={capture}><Text style={s.outlineText}>{t.closeWithPhoto}</Text></Pressable>
-            {!!draftPhotos.length && <Pressable style={s.primary} onPress={submitPhotos}><Text style={s.primaryText}>{t.submitWithPhotos}</Text></Pressable>}
+            {!!draftPhotos.length && <View style={s.mainActionPanel}><Text style={s.actionCaption}>{detailCopy.mainAction}</Text><Pressable disabled={submittingPhotos} style={[s.primary, submittingPhotos && s.disabled]} onPress={submitPhotos}><Text style={s.primaryText}>{submittingPhotos ? detailCopy.sending : t.submitWithPhotos}</Text></Pressable></View>}
           </View>
         )}
         {role === "inspector" && task.status === "review" && (
           <View style={s.card}>
+            <Text style={s.cardTitle}>{t.inspectorChecklist}</Text>
+            {[t.verifyWork, t.verifyPhotos, t.verifyLocation].map((label, index) => (
+              <Pressable key={label} style={s.check} onPress={() => setInspectorChecks((current) => current.map((value, itemIndex) => itemIndex === index ? !value : value))}>
+                <Text style={[s.checkBox, inspectorChecks[index] && s.checkDone]}>{inspectorChecks[index] ? "✓" : ""}</Text>
+                <Text style={s.flex}>{label}</Text>
+              </Pressable>
+            ))}
             <Text style={s.cardTitle}>{t.inspectorDecision}</Text>
             <TextInput value={reviewNote} onChangeText={setReviewNote} placeholder={t.reviewComment} multiline style={s.input} />
-            <View style={s.actionRow}>
-              <Pressable style={[s.primary, s.action]} onPress={() => { updateData(reviewTask(data, task.id, 'accepted', reviewNote, undefined, lang)); setReviewNote(''); }}><Text style={s.primaryText}>{t.accept}</Text></Pressable>
-              <Pressable style={[s.outlineInline, s.action]} onPress={() => {
+            <View style={s.mainActionPanel}><Text style={s.actionCaption}>{detailCopy.mainAction}</Text>
+              <Pressable style={[s.primary, !inspectorChecks.every(Boolean) && s.disabled]} onPress={() => {
+                if (!inspectorChecks.every(Boolean)) return Alert.alert(t.inspectorChecklist, t.inspectorChecklistRequired);
+                updateData(reviewTask(data, task.id, 'accepted', reviewNote, undefined, lang)); setReviewNote(''); setInspectorChecks([false, false, false]);
+              }}><Text style={s.primaryText}>{t.accept}</Text></Pressable>
+            </View>
+            <View style={s.dangerZone}><Text style={s.dangerCaption}>{detailCopy.dangerActions}</Text><Pressable style={s.danger} onPress={() => {
                 const next = reviewTask(data, task.id, 'rejected', reviewNote, undefined, lang);
                 if (next === data) return Alert.alert(t.reviewCommentRequired, t.rejectionReason);
                 updateData(next); setReviewNote('');
-              }}><Text style={s.outlineText}>{t.reject}</Text></Pressable>
-            </View>
+              }}><Text style={s.dangerText}>{t.reject}</Text></Pressable></View>
           </View>
         )}
         {task.reviewNote && <View style={s.card}><Text style={s.label}>{t.reviewResult}</Text><Text>{task.reviewNote}</Text></View>}
-        <Text style={s.queue}>
-          {t.syncQueue}: {data.queue.length}
-        </Text>
+        {data.queue.some((item) => item.entityId === task.id) && (
+          <Text style={s.queue}>
+            {t.syncQueue}: {data.queue.filter((item) => item.entityId === task.id).length}
+          </Text>
+        )}
       </View>
     );
   return (
@@ -1128,21 +1637,36 @@ function TasksScreen({
         <Text style={s.cardTitle}>{c.newTask}</Text>
         <TextInput value={createTitle} onChangeText={setCreateTitle} placeholder={c.title} style={s.input} />
         <Text style={s.label}>{c.chooseObject}</Text>
-        {data.projects.map((project) => <Pressable key={project.id} style={project.id === createProjectId ? s.primary : s.outlineInline} onPress={() => { setCreateProjectId(project.id); setCreateSectionId(''); void loadPlanning(project.id); }}><Text style={project.id === createProjectId ? s.primaryText : s.outlineText}>{project.name}</Text></Pressable>)}
+        {data.projects.map((project) => <Pressable key={project.id} style={project.id === createProjectId ? s.primary : s.outlineInline} onPress={() => { setCreateProjectId(project.id); setCreateSectionId(''); setCreateReviewerId(''); void loadPlanning(project.id); }}><Text style={project.id === createProjectId ? s.primaryText : s.outlineText}>{project.name}</Text></Pressable>)}
         <Text style={s.label}>{c.chooseSection}</Text>
         {planningSections.length === 0 && <Text style={s.muted}>{c.loading}</Text>}
         {planningSections.map((section) => <Pressable key={section.id} style={section.id === createSectionId ? s.primary : s.outlineInline} onPress={() => setCreateSectionId(section.id)}><Text style={section.id === createSectionId ? s.primaryText : s.outlineText}>{section.stage} - {section.name}</Text></Pressable>)}
         <Text style={s.label}>{c.chooseAssignee}</Text>
         <Pressable style={!createAssigneeId ? s.primary : s.outlineInline} onPress={() => setCreateAssigneeId('')}><Text style={!createAssigneeId ? s.primaryText : s.outlineText}>{c.noAssignee}</Text></Pressable>
         {planningUsers.map((user) => <Pressable key={user.id} style={user.id === createAssigneeId ? s.primary : s.outlineInline} onPress={() => setCreateAssigneeId(user.id)}><Text style={user.id === createAssigneeId ? s.primaryText : s.outlineText}>{user.fullName}</Text></Pressable>)}
+        <Text style={s.label}>{c.chooseReviewer}</Text>
+        <Pressable style={!createReviewerId ? s.primary : s.outlineInline} onPress={() => setCreateReviewerId('')}><Text style={!createReviewerId ? s.primaryText : s.outlineText}>{c.noReviewer}</Text></Pressable>
+        {data.reviewers.filter((reviewer) => (reviewer.objectIds.length === 0 || reviewer.objectIds.includes(createProjectId)) && reviewer.id !== createAssigneeId).map((reviewer) => <Pressable key={reviewer.id} style={reviewer.id === createReviewerId ? s.primary : s.outlineInline} onPress={() => setCreateReviewerId(reviewer.id)}><Text style={reviewer.id === createReviewerId ? s.primaryText : s.outlineText}>{reviewer.name}</Text></Pressable>)}
+        {data.reviewers.filter((reviewer) => reviewer.objectIds.length === 0 || reviewer.objectIds.includes(createProjectId)).length === 0 && <Text style={s.muted}>{t.noInspectors}</Text>}
         <Text style={s.label}>{c.priority}</Text>
         <View style={s.actionRow}>{(['low', 'normal', 'high'] as const).map((priority) => <Pressable key={priority} style={[priority === createPriority ? s.primary : s.outlineInline, s.action]} onPress={() => setCreatePriority(priority)}><Text style={priority === createPriority ? s.primaryText : s.outlineText}>{priority === 'low' ? t.low : priority === 'high' ? t.high : t.medium}</Text></Pressable>)}</View>
-        <DateFields value={createDeadline} onChange={setCreateDeadline} label={c.deadlineHint} clearLabel={c.clearDate} />
-        <TextInput value={createChecklist} onChangeText={setCreateChecklist} placeholder={extra.checklist} multiline style={s.input} />
+        <DateFields value={createDeadline} onChange={setCreateDeadline} label={c.deadlineHint} clearLabel={c.clearDate} lang={lang} time={createDeadlineTime} onTimeChange={setCreateDeadlineTime} />
+        <Text style={s.label}>{extra.checklist}</Text>
+        {createChecklistItems.map((item, index) => (
+          <View key={index} style={s.card}>
+            <TextInput value={item} onChangeText={(value) => updateCreateChecklistItem(index, value)} placeholder={`${extra.checklistItem} ${index + 1}`} style={s.input} />
+            <View style={s.actionRow}>
+              <Pressable disabled={index === 0} style={[s.outlineInline, s.action, index === 0 && s.disabled]} onPress={() => moveCreateChecklistItem(index, -1)} accessibilityLabel={extra.moveUp}><Text style={s.outlineText}>↑</Text></Pressable>
+              <Pressable disabled={index === createChecklistItems.length - 1} style={[s.outlineInline, s.action, index === createChecklistItems.length - 1 && s.disabled]} onPress={() => moveCreateChecklistItem(index, 1)} accessibilityLabel={extra.moveDown}><Text style={s.outlineText}>↓</Text></Pressable>
+              <Pressable style={[s.outlineInline, s.action]} onPress={() => removeCreateChecklistItem(index)} accessibilityLabel={extra.removeChecklistItem}><Text style={s.outlineText}>×</Text></Pressable>
+            </View>
+          </View>
+        ))}
+        <Pressable style={s.outline} onPress={() => setCreateChecklistItems((items) => [...items, ''])}><Text style={s.outlineText}>+ {extra.addChecklistItem}</Text></Pressable>
         <Pressable disabled={creating} style={s.primary} onPress={() => void submitTask()}><Text style={s.primaryText}>{creating ? c.loading : c.create}</Text></Pressable>
         <Pressable disabled={creating} style={s.outline} onPress={() => setShowCreate(false)}><Text style={s.outlineText}>{c.cancel}</Text></Pressable>
       </View>}
-      <TextInput value={query} onChangeText={setQuery} placeholder={c.search} style={s.search} />
+      <TextInput value={query} onChangeText={setQuery} placeholder={c.search} placeholderTextColor="#8a938f" style={s.search} />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -1162,24 +1686,25 @@ function TasksScreen({
           ),
         )}
       </ScrollView>
-      {items.map((x) => (
-        <Pressable style={s.card} key={x.id} onPress={() => setSelected(x.id)}>
-          <View style={s.row}>
+      {items.map((x) => {
+        const overdue = x.status !== "done" && x.due < new Date().toISOString().slice(0, 10);
+        return <Pressable style={s.taskCard} key={x.id} onPress={() => setSelected(x.id)}>
+          <View style={s.taskTitleRow}>
+            <Text style={[s.cardTitle, s.flex]}>{x.title}</Text>
+            <Text style={[s.taskStatus, s[`taskStatus_${x.status}`]]}>{labels[x.status]}</Text>
+          </View>
+          <Text style={s.taskContext}>
+            {projects.find((p) => p.id === x.projectId)?.name} - {x.stage}
+          </Text>
+          <View style={s.taskMetaRow}>
+            <Text style={[s.taskDue, overdue && s.taskDueOverdue]}>{t.deadline}: {x.due}</Text>
             <Text style={[s.priority, x.priority === "high" && s.priorityHigh]}>
               {x.priority === "high" ? t.high : x.priority === "medium" ? t.medium : t.low}
             </Text>
-            <Text style={s.status}>{labels[x.status]}</Text>
           </View>
-          <Text style={s.cardTitle}>{x.title}</Text>
-          <Text style={s.muted}>
-            {projects.find((p) => p.id === x.projectId)?.name} - {x.stage}
-          </Text>
-          <View style={s.row}>
-            <Text style={s.muted}>{x.assignee}</Text>
-            <Text style={s.muted}>{x.due}</Text>
-          </View>
-        </Pressable>
-      ))}
+          <Text style={s.taskAssignee}>{t.responsible}: {x.assignee}</Text>
+        </Pressable>;
+      })}
       {items.length === 0 && <Text style={s.muted}>{c.empty}</Text>}
     </View>
   );
@@ -1276,9 +1801,7 @@ function QualityScreen({
       const uploadedPhotos: { angle: string; uri: string }[] = [];
       for (const photo of report.photos) {
         if (!photo.uri.startsWith('file://') && !photo.uri.startsWith('content://')) { uploadedPhotos.push(photo); continue; }
-        const source = await fetch(photo.uri);
-        if (!source.ok) throw new Error('photo_read_failed');
-        const upload = await api.request('/api/uploads', { method: 'POST', headers: { 'content-type': 'image/jpeg', 'idempotency-key': `quality:${report.id}:${photo.angle}`, 'x-file-name': `quality-${report.id}-${uploadedPhotos.length + 1}.jpg` }, body: await source.blob() });
+        const upload = await api.uploadFile('/api/uploads', photo.uri, { 'content-type': 'image/jpeg', 'idempotency-key': `quality:${report.id}:${photo.angle}`, 'x-file-name': `quality-${report.id}-${uploadedPhotos.length + 1}.jpg` });
         if (!upload.ok) throw new Error(`Upload HTTP ${upload.status}`);
         const file = await upload.json() as { url: string };
         uploadedPhotos.push({ angle: photo.angle, uri: file.url });
@@ -1332,7 +1855,7 @@ function QualityScreen({
           const photo = report.photos.find((p) => p.angle === angle);
           return (
             <View key={angle} style={s.card}>
-              {photo && <PhotoViewer uri={photo.uri} />}
+              {photo && <PhotoViewer uri={photo.uri} api={api} />}
               <View style={s.row}>
                 <Text style={s.cardTitle}>
                   {photo ? "✓ " : "○ "}
@@ -1462,10 +1985,10 @@ function QualityScreen({
             </Pressable>
           </View>
           {x.beforeUri && (
-            <PhotoViewer uri={x.beforeUri} compact />
+            <PhotoViewer uri={x.beforeUri} compact api={api} />
           )}
           {x.afterUri && (
-            <PhotoViewer uri={x.afterUri} compact />
+            <PhotoViewer uri={x.afterUri} compact api={api} />
           )}
         </View>
       ))}
@@ -1568,9 +2091,7 @@ function FeedScreen({
     const asset = !result.canceled ? result.assets[0] : undefined;
     if (!asset) return;
     try {
-      const local = await fetch(asset.uri);
-      if (!local.ok) throw new Error('file_read_failed');
-      const upload = await api.request('/api/uploads', { method: 'POST', headers: { 'content-type': 'application/pdf', 'idempotency-key': `document:${documentProjectId}:${asset.name}:${Date.now()}`, 'x-file-name': asset.name }, body: await local.blob() });
+      const upload = await api.uploadFile('/api/uploads', asset.uri, { 'content-type': 'application/pdf', 'idempotency-key': `document:${documentProjectId}:${asset.name}:${Date.now()}`, 'x-file-name': asset.name });
       if (!upload.ok) throw new Error(`Upload HTTP ${upload.status}`);
       const uploaded = await upload.json() as { url: string };
       const response = await api.request(`/api/objects/${encodeURIComponent(documentProjectId)}/documents`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: asset.name.replace(/\.pdf$/i, ''), kind: 'project', fileUrl: uploaded.url }) });
@@ -1714,7 +2235,7 @@ function FeedScreen({
               <Text style={s.muted}>
                 {formatDateTime(d.createdAt, lang)}
               </Text>
-              <Pressable style={s.outlineInline} onPress={() => void shareFile(d.uri, `${d.name}.pdf`, api)}><Text style={s.outlineText}>{c.openPdf}</Text></Pressable>
+              <Pressable style={s.outlineInline} onPress={() => void openPdf(d.uri, `${d.name}.pdf`, api, c.error)}><Text style={s.outlineText}>{c.openPdf}</Text></Pressable>
               {(role === 'customer' || role === 'inspector') && d.status === 'review' && <View style={s.actionRow}>
                 <Pressable style={[s.primary, s.action]} onPress={async () => {
                   if (!api) return;
@@ -1728,9 +2249,9 @@ function FeedScreen({
                   const response = await api.request(`/api/documents/${encodeURIComponent(d.id)}/decision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision: 'rejected', note: documentNote.trim() }) });
                   if (response.ok) updateData({ ...data, documents: data.documents.map((item) => item.id === d.id ? { ...item, status: 'rejected' } : item) });
                   else Alert.alert(c.error, `HTTP ${response.status}`);
-                }}><Text style={s.primaryText}>{c.reject}</Text></Pressable>
+                }}><Text style={s.dangerText}>{c.reject}</Text></Pressable>
               </View>}
-              {(role === 'customer' || role === 'inspector') && d.status === 'review' && <TextInput value={documentNote} onChangeText={setDocumentNote} placeholder={c.rejectionComment} multiline style={s.input} />}
+              {(role === 'customer' || role === 'inspector') && d.status === 'review' && <TextInput value={documentNote} onChangeText={setDocumentNote} placeholder={c.rejectionComment} placeholderTextColor="#8a938f" multiline style={s.input} />}
             </View>
           ))}
         </View>
@@ -1740,28 +2261,49 @@ function FeedScreen({
   );
 }
 
+const ActPhotoPreviews = memo(function ActPhotoPreviews({
+  photos,
+  removeLabel,
+  setPhotos,
+}: {
+  photos: { uri: string; mimeType: string }[];
+  removeLabel: string;
+  setPhotos: React.Dispatch<React.SetStateAction<{ uri: string; mimeType: string }[]>>;
+}) {
+  if (photos.length === 0) return null;
+  return <>{photos.map((photo, index) => <View key={`${photo.uri}:${index}`}>
+    <Image source={{ uri: photo.uri }} resizeMode="cover" style={s.defectPhoto} />
+    <Pressable style={s.dangerInline} onPress={() => setPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))}>
+      <Text style={s.dangerText}>{removeLabel}</Text>
+    </Pressable>
+  </View>)}</>;
+});
+
 function ActsScreen({ lang, role, api, data, updateData }: { lang: Lang; role: Role; api: ApiClient | null; data: AppData; updateData: (d: AppData) => void }) {
   const c = lang === "uz" ? {
     completed: "Bajarilgan ishlar dalolatnomasi", hidden: "Yashirin ishlar dalolatnomasi", acceptance: "Qabul qilish dalolatnomasi",
-    notReady: "Dalolatnoma tayyor emas", fillRequired: "Majburiy maydonlarni to'ldiring va barmoq bilan imzo qo'ying.",
-    object: "Obyekt", date: "Sana", works: "Ishlar", contractor: "Pudratchi", customer: "Buyurtmachi", amount: "Summa", notes: "Izoh", signature: "Mas'ul shaxs imzosi", createdOffline: "StroyControl 1.0 da oflayn yaratildi",
+    notReady: "Dalolatnoma tayyor emas", fillRequired: "Majburiy maydonlarni to'ldiring.",
+    object: "Obyekt", date: "Sana", works: "Ishlar", contractor: "Pudratchi", customer: "Buyurtmachi", amount: "Summa", notes: "Izoh", createdOffline: "StroyControl 1.0 da oflayn yaratildi",
     pdfError: "PDF xatosi", pdfErrorBody: "Hujjatni yaratish yoki yuborib bo'lmadi.", eyebrow: "StroyControl 1.0 - hujjatlar", title: "Dalolatnomalar va shakllar",
-    tabWorks: "Ishlar", tabHidden: "Yashirin", tabAcceptance: "Qabul", actNumber: "Dalolatnoma raqami", workName: "Ish nomi", fingerSignature: "Barmoq bilan imzo", signHere: "Shu yerga imzo qo'ying", clearSignature: "Imzoni tozalash", createPdf: "PDF yaratish va yuborish", readyActs: "Tayyor dalolatnomalar", sendPdf: "PDF yuborish", sum: "so'm",
-    error: "Xato", openAndSign: "Ochish va imzolash", review: "Tekshiruvda", signed: "Imzolangan", draft: "Qoralama",
+    tabWorks: "Ishlar", tabHidden: "Yashirin", tabAcceptance: "Qabul", actNumber: "Dalolatnoma raqami", workName: "Ish nomi", createPdf: "PDF yaratish va yuborish", readyActs: "Tayyor dalolatnomalar", sendPdf: "PDF yuborish", sum: "so'm",
+    error: "Xato", openPdf: "PDF ochish", signAct: "Dalolatnomani imzolash", confirmSign: "PDF ni tekshirdingizmi? Imzo qo'yilgandan keyin amalni bekor qilib bo'lmaydi.", cancel: "Bekor qilish", review: "Tekshiruvda", signed: "Imzolangan", draft: "Qoralama",
+    photos: "Dalolatnoma fotosuratlari", addPhotos: "JPG, PNG yoki WebP qo'shish", photoLimit: "Bitta dalolatnomaga 10 tagacha fotosurat qo'shish mumkin.", removePhoto: "Olib tashlash",
   } : lang === "en" ? {
     completed: "Completed works act", hidden: "Hidden works act", acceptance: "Acceptance act",
-    notReady: "Act is not ready", fillRequired: "Complete the required fields and add a finger signature.",
-    object: "Site", date: "Date", works: "Works", contractor: "Contractor", customer: "Customer", amount: "Amount", notes: "Notes", signature: "Responsible person's signature", createdOffline: "Created offline in StroyControl 1.0",
+    notReady: "Act is not ready", fillRequired: "Complete the required fields.",
+    object: "Site", date: "Date", works: "Works", contractor: "Contractor", customer: "Customer", amount: "Amount", notes: "Notes", createdOffline: "Created offline in StroyControl 1.0",
     pdfError: "PDF error", pdfErrorBody: "Could not create or send the document.", eyebrow: "StroyControl 1.0 - documents", title: "Acts and forms",
-    tabWorks: "Works", tabHidden: "Hidden", tabAcceptance: "Acceptance", actNumber: "Act number", workName: "Work description", fingerSignature: "Finger signature", signHere: "Sign here", clearSignature: "Clear signature", createPdf: "Create and send PDF", readyActs: "Completed acts", sendPdf: "Send PDF", sum: "UZS",
-    error: "Error", openAndSign: "Open and sign", review: "In review", signed: "Signed", draft: "Draft",
+    tabWorks: "Works", tabHidden: "Hidden", tabAcceptance: "Acceptance", actNumber: "Act number", workName: "Work description", createPdf: "Create and send PDF", readyActs: "Completed acts", sendPdf: "Send PDF", sum: "UZS",
+    error: "Error", openPdf: "Open PDF", signAct: "Sign act", confirmSign: "Have you checked the PDF? Signing cannot be undone.", cancel: "Cancel", review: "In review", signed: "Signed", draft: "Draft",
+    photos: "Act photos", addPhotos: "Add JPG, PNG or WebP", photoLimit: "You can add up to 10 photos to one act.", removePhoto: "Remove",
   } : {
     completed: "Акт выполненных работ", hidden: "Акт скрытых работ", acceptance: "Акт приемки",
-    notReady: "Акт не готов", fillRequired: "Заполни обязательные поля и поставь подпись пальцем.",
-    object: "Объект", date: "Дата", works: "Работы", contractor: "Подрядчик", customer: "Заказчик", amount: "Сумма", notes: "Примечание", signature: "Подпись ответственного", createdOffline: "Создано офлайн в StroyControl 1.0",
+    notReady: "Акт не готов", fillRequired: "Заполни обязательные поля.",
+    object: "Объект", date: "Дата", works: "Работы", contractor: "Подрядчик", customer: "Заказчик", amount: "Сумма", notes: "Примечание", createdOffline: "Создано офлайн в StroyControl 1.0",
     pdfError: "Ошибка PDF", pdfErrorBody: "Не удалось сформировать или отправить документ.", eyebrow: "StroyControl 1.0 - документы", title: "Акты и формы",
-    tabWorks: "Работы", tabHidden: "Скрытые", tabAcceptance: "Приемка", actNumber: "Номер акта", workName: "Наименование работ", fingerSignature: "Подпись пальцем", signHere: "Распишись здесь", clearSignature: "Очистить подпись", createPdf: "Создать и отправить PDF", readyActs: "Готовые акты", sendPdf: "Отправить PDF", sum: "сум",
-    error: "Ошибка", openAndSign: "Открыть и подписать", review: "На проверке", signed: "Подписан", draft: "Черновик",
+    tabWorks: "Работы", tabHidden: "Скрытые", tabAcceptance: "Приемка", actNumber: "Номер акта", workName: "Наименование работ", createPdf: "Создать и отправить PDF", readyActs: "Готовые акты", sendPdf: "Отправить PDF", sum: "сум",
+    error: "Ошибка", openPdf: "Открыть PDF", signAct: "Подписать акт", confirmSign: "Ты проверил PDF? После подписания действие нельзя отменить.", cancel: "Отмена", review: "На проверке", signed: "Подписан", draft: "Черновик",
+    photos: "Фото к акту", addPhotos: "Добавить JPG, PNG или WebP", photoLimit: "К одному акту можно добавить до 10 фото.", removePhoto: "Удалить",
   };
   const [projectId, setProjectId] = useState(data.projects[0]?.id ?? "");
   const [template, setTemplate] = useState<"completed" | "hidden" | "acceptance">("completed");
@@ -1771,25 +2313,67 @@ function ActsScreen({ lang, role, api, data, updateData }: { lang: Lang; role: R
   const [customer, setCustomer] = useState("");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
-  const [signature, setSignature] = useState<{ x: number; y: number }[]>([]);
+  const [photos, setPhotos] = useState<{ uri: string; mimeType: string }[]>([]);
+  const [preparingPdf, setPreparingPdf] = useState(false);
+  const [visibleActCount, setVisibleActCount] = useState(20);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const pan = useRef(PanResponder.create({ onStartShouldSetPanResponder: () => true, onMoveShouldSetPanResponder: () => true, onPanResponderGrant: (e) => setSignature([{ x: e.nativeEvent.locationX, y: e.nativeEvent.locationY }]), onPanResponderMove: (e) => setSignature((old) => [...old.slice(-300), { x: e.nativeEvent.locationX, y: e.nativeEvent.locationY }]) })).current;
   const names = { completed: c.completed, hidden: c.hidden, acceptance: c.acceptance } as const;
+  const actsByProject = useMemo(() => {
+    const grouped = new Map<string, AppData['acts']>();
+    for (const act of data.acts) {
+      const acts = grouped.get(act.projectId);
+      if (acts) acts.push(act);
+      else grouped.set(act.projectId, [act]);
+    }
+    return grouped;
+  }, [data.acts]);
+  const projectActs = actsByProject.get(projectId) ?? [];
+  const selectedProjectName = data.projects.find((project) => project.id === projectId)?.name ?? "-";
+  const selectProject = (nextProjectId: string) => {
+    if (nextProjectId === projectId) return;
+    setVisibleActCount(20);
+    setProjectId(nextProjectId);
+  };
   const actStatus = (value?: string) => value === 'review' ? c.review : value === 'signed' ? c.signed : value === 'draft' ? c.draft : value;
   const escape = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+  const pickPhotos = async () => {
+    if (photos.length >= 10) return Alert.alert(c.photos, c.photoLimit);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const selected = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 10 - photos.length, quality: 0.8 });
+    if (selected.canceled) return;
+    const supported = selected.assets.filter((asset) => ['image/jpeg', 'image/png', 'image/webp'].includes(asset.mimeType ?? 'image/jpeg'));
+    const optimized: { uri: string; mimeType: string }[] = [];
+    for (const asset of supported) {
+      const resized = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 1280 } }],
+        { compress: 0.68, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      optimized.push({ uri: resized.uri, mimeType: 'image/jpeg' });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    setPhotos((current) => [...current, ...optimized].slice(0, 10));
+  };
   const createPdf = async () => {
-    const next = createWorkAct(data, { projectId, template, number, title, contractor, customer, amount: Number(amount.replace(",", ".")), date, notes, signature });
+    if (preparingPdf) return;
+    const next = createWorkAct(data, { projectId, template, number, title, contractor, customer, amount: Number(amount.replace(",", ".")), date, notes, signature: [] });
     if (next === data) return Alert.alert(c.notReady, c.fillRequired);
     const act = next.acts[0]!;
     const project = data.projects.find((p) => p.id === projectId)?.name ?? "-";
-    const dots = signature.map((p) => `<i style="left:${Math.round(p.x)}px;top:${Math.round(p.y)}px"></i>`).join("");
-    const html = `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial;padding:36px;color:#17211d}h1{text-align:center;font-size:22px}table{width:100%;border-collapse:collapse;margin:24px 0}td{border:1px solid #bbb;padding:9px}.sign{position:relative;width:280px;height:110px;border-bottom:1px solid #333}.sign i{position:absolute;width:3px;height:3px;background:#111;border-radius:2px}small{color:#666}</style></head><body><h1>${names[template]} № ${escape(number)}</h1><p>${c.object}: <b>${escape(project)}</b></p><p>${c.date}: ${escape(date)}</p><table><tr><td>${c.works}</td><td>${escape(title)}</td></tr><tr><td>${c.contractor}</td><td>${escape(contractor)}</td></tr><tr><td>${c.customer}</td><td>${escape(customer)}</td></tr><tr><td>${c.amount}</td><td>${Number(amount.replace(",", ".")).toLocaleString(localeCode(lang))} ${c.sum}</td></tr><tr><td>${c.notes}</td><td>${escape(notes || "-")}</td></tr></table><p>${c.signature}:</p><div class="sign">${dots}</div><small>${c.createdOffline}</small></body></html>`;
+    setPreparingPdf(true);
     try {
+      const embeddedPhotos: { uri: string; mimeType: string; base64: string }[] = [];
+      for (const photo of photos) {
+        const base64 = await FileSystem.readAsStringAsync(photo.uri, { encoding: FileSystem.EncodingType.Base64 });
+        embeddedPhotos.push({ ...photo, base64 });
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      const photoHtml = embeddedPhotos.length ? `<h2>${c.photos}</h2><div class="photos">${embeddedPhotos.map((photo, index) => `<figure><img src="data:${photo.mimeType};base64,${photo.base64}"/><figcaption>${index + 1}</figcaption></figure>`).join('')}</div>` : '';
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial;padding:36px;color:#17211d}h1{text-align:center;font-size:22px}h2{margin-top:28px;font-size:18px;page-break-after:avoid}table{width:100%;border-collapse:collapse;margin:24px 0}td{border:1px solid #bbb;padding:9px}small{color:#666}.photos{display:flex;flex-wrap:wrap;gap:14px}.photos figure{width:calc(50% - 8px);margin:0 0 16px;page-break-inside:avoid}.photos img{display:block;width:100%;height:240px;object-fit:contain;background:#f2f4f3}.photos figcaption{text-align:center;color:#666;margin-top:4px}</style></head><body><h1>${names[template]} № ${escape(number)}</h1><p>${c.object}: <b>${escape(project)}</b></p><p>${c.date}: ${escape(date)}</p><table><tr><td>${c.works}</td><td>${escape(title)}</td></tr><tr><td>${c.contractor}</td><td>${escape(contractor)}</td></tr><tr><td>${c.customer}</td><td>${escape(customer)}</td></tr><tr><td>${c.amount}</td><td>${Number(amount.replace(",", ".")).toLocaleString(localeCode(lang))} ${c.sum}</td></tr><tr><td>${c.notes}</td><td>${escape(notes || "-")}</td></tr></table>${photoHtml}<small>${c.createdOffline}</small></body></html>`;
       const file = await Print.printToFileAsync({ html });
       if (!api) throw new Error('api_unavailable');
-      const localPdf = await fetch(file.uri);
-      if (!localPdf.ok) throw new Error('pdf_read_failed');
-      const upload = await api.request('/api/uploads', { method: 'POST', headers: { 'content-type': 'application/pdf', 'idempotency-key': `act-pdf:${projectId}:${number.trim()}:${Date.now()}`, 'x-file-name': `act-${number.trim()}.pdf` }, body: await localPdf.blob() });
+      const upload = await api.uploadFile('/api/uploads', file.uri, { 'content-type': 'application/pdf', 'idempotency-key': `act-pdf:${projectId}:${number.trim()}:${Date.now()}`, 'x-file-name': `act-${number.trim()}.pdf` });
       if (!upload.ok) throw new Error(`Upload HTTP ${upload.status}`);
       const uploaded = await upload.json() as { url: string };
       const response = await api.request(`/api/objects/${encodeURIComponent(projectId)}/acts`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ template, number: number.trim(), title: title.trim(), amount: Number(amount.replace(',', '.')), pdfUrl: uploaded.url }) });
@@ -1798,19 +2382,32 @@ function ActsScreen({ lang, role, api, data, updateData }: { lang: Lang; role: R
       const completed = attachActPdf(next, act.id, file.uri);
       updateData({ ...completed, acts: completed.acts.map((item) => item.id === act.id ? { ...item, id: created.id, status: created.status, createdAt: created.createdAt } : item), queue: completed.queue.filter((item) => item.entityId !== act.id) });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: names[template] });
-      setNumber(""); setTitle(""); setAmount(""); setNotes(""); setSignature([]);
+      setNumber(""); setTitle(""); setAmount(""); setNotes(""); setPhotos([]);
     } catch { Alert.alert(c.pdfError, c.pdfErrorBody); }
+    finally { setPreparingPdf(false); }
   };
-  const sharePdf = async (uri?: string) => { if (uri) await shareFile(uri, 'act.pdf', api); };
+  const sharePdf = async (uri?: string) => { if (uri) await openPdf(uri, 'act.pdf', api, c.error); };
+  const signAct = (id: string) => Alert.alert(c.signAct, c.confirmSign, [
+    { text: c.cancel, style: 'cancel' },
+    { text: c.signAct, onPress: async () => {
+      if (!api) return;
+      const response = await api.request(`/api/acts/${encodeURIComponent(id)}/sign`, { method: 'POST' });
+      if (response.ok) updateData({ ...data, acts: data.acts.map((item) => item.id === id ? { ...item, status: 'signed', signedAt: new Date().toISOString() } : item) });
+      else Alert.alert(c.error, `HTTP ${response.status}`);
+    } },
+  ]);
   return <View>
     <Text style={s.eyebrow}>{c.eyebrow}</Text><Text style={s.h1}>{c.title}</Text>
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filters}>{data.projects.map((p) => <Pressable key={p.id} style={[s.filter, projectId === p.id && s.filterActive]} onPress={() => setProjectId(p.id)}><Text style={projectId === p.id ? s.filterTextActive : s.filterText}>{p.name}</Text></Pressable>)}</ScrollView>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.filters}>{data.projects.map((p) => <Pressable key={p.id} style={[s.filter, projectId === p.id && s.filterActive]} onPress={() => selectProject(p.id)}><Text style={projectId === p.id ? s.filterTextActive : s.filterText}>{p.name}</Text></Pressable>)}</ScrollView>
     <View style={s.segment}>{(["completed", "hidden", "acceptance"] as const).map((x) => <Pressable key={x} style={[s.segmentBtn, template === x && s.segmentActive]} onPress={() => setTemplate(x)}><Text style={template === x ? s.segmentTextActive : s.segmentText}>{x === "completed" ? c.tabWorks : x === "hidden" ? c.tabHidden : c.tabAcceptance}</Text></Pressable>)}</View>
     {['director', 'pm', 'foreman', 'admin'].includes(role) && <View style={s.card}><Text style={s.cardTitle}>{names[template]}</Text>
       <TextInput value={number} onChangeText={setNumber} placeholder={c.actNumber} style={s.field} /><TextInput value={title} onChangeText={setTitle} placeholder={c.workName} multiline style={s.input} /><TextInput value={contractor} onChangeText={setContractor} placeholder={c.contractor} style={s.field} /><TextInput value={customer} onChangeText={setCustomer} placeholder={c.customer} style={s.field} /><TextInput value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={c.amount} style={s.field} /><TextInput value={date} onChangeText={setDate} placeholder={c.date} style={s.field} /><TextInput value={notes} onChangeText={setNotes} placeholder={c.notes} multiline style={s.input} />
-      <Text style={s.label}>{c.fingerSignature}</Text><View style={s.signaturePad} {...pan.panHandlers}>{signature.map((p, i) => <View key={i} style={[s.signatureDot, { left: p.x, top: p.y }]} />)}{signature.length === 0 && <Text style={s.signatureHint}>{c.signHere}</Text>}</View><Pressable style={s.outlineInline} onPress={() => setSignature([])}><Text style={s.outlineText}>{c.clearSignature}</Text></Pressable><Pressable style={s.primary} onPress={createPdf}><Text style={s.primaryText}>{c.createPdf}</Text></Pressable>
+      <ActPhotoPreviews photos={photos} removeLabel={c.removePhoto} setPhotos={setPhotos} />
+      <Pressable style={s.outlineInline} onPress={pickPhotos}><Text style={s.outlineText}>{c.addPhotos} ({photos.length}/10)</Text></Pressable>
+      <Pressable style={[s.primary, preparingPdf && s.disabled]} disabled={preparingPdf} onPress={createPdf}><Text style={s.primaryText}>{preparingPdf ? (lang === 'uz' ? 'PDF tayyorlanmoqda...' : lang === 'en' ? 'Preparing PDF...' : 'Подготавливаем PDF...') : c.createPdf}</Text></Pressable>
     </View>}
-    <Text style={s.section}>{c.readyActs}</Text>{data.acts.map((x) => <View key={x.id} style={s.card}><View style={s.row}><Text style={[s.cardTitle, s.flex]}>{names[x.template]} № {x.number}</Text><Text style={s.status}>{actStatus(x.status) ?? x.date}</Text></View><Text style={s.muted}>{x.title} - {data.projects.find((p) => p.id === x.projectId)?.name}</Text>{x.pdfUri && <Pressable style={s.outlineInline} onPress={() => sharePdf(x.pdfUri)}><Text style={s.outlineText}>{c.sendPdf}</Text></Pressable>}{(role === 'customer' || role === 'inspector') && x.status === 'review' && <Pressable style={s.primary} onPress={async () => { if (!api) return; const response = await api.request(`/api/acts/${encodeURIComponent(x.id)}/sign`, { method: 'POST' }); if (response.ok) updateData({ ...data, acts: data.acts.map((item) => item.id === x.id ? { ...item, status: 'signed', signedAt: new Date().toISOString() } : item) }); else Alert.alert(c.error, `HTTP ${response.status}`); }}><Text style={s.primaryText}>{c.openAndSign}</Text></Pressable>}</View>)}
+    <Text style={s.section}>{c.readyActs}</Text>{projectActs.slice(0, visibleActCount).map((x) => <View key={x.id} style={s.card}><View style={s.row}><Text style={[s.cardTitle, s.flex]}>{names[x.template]} № {x.number}</Text><Text style={s.status}>{actStatus(x.status) ?? x.date}</Text></View><Text style={s.muted}>{x.title} - {selectedProjectName}</Text>{x.pdfUri && <Pressable style={s.outlineInline} onPress={() => sharePdf(x.pdfUri)}><Text style={s.outlineText}>{c.openPdf}</Text></Pressable>}{(role === 'customer' || role === 'inspector') && x.status === 'review' && <Pressable style={s.primary} onPress={() => signAct(x.id)}><Text style={s.primaryText}>{c.signAct}</Text></Pressable>}</View>)}
+    {projectActs.length > visibleActCount && <Pressable style={s.outlineInline} onPress={() => setVisibleActCount((count) => count + 20)}><Text style={s.outlineText}>{lang === 'uz' ? 'Yana ko\'rsatish' : lang === 'en' ? 'Show more' : 'Показать еще'}</Text></Pressable>}
   </View>;
 }
 
@@ -2555,12 +3152,6 @@ function SafetyScreen({ lang, data, updateData }: { lang: Lang; data: AppData; u
   const [violationResponsible, setViolationResponsible] = useState("");
   const [photoUri, setPhotoUri] = useState("");
   const [coordinates, setCoordinates] = useState<{ latitude?: number; longitude?: number }>({});
-  const pan = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: (e) => setSignature([{ x: e.nativeEvent.locationX, y: e.nativeEvent.locationY }]),
-    onPanResponderMove: (e) => setSignature((old) => [...old.slice(-300), { x: e.nativeEvent.locationX, y: e.nativeEvent.locationY }]),
-  })).current;
   const saveChecklist = () => {
     const next = saveSafetyChecklist(data, projectId, responsible, items, signature, new Date().toISOString().slice(0, 10));
     if (next === data) return Alert.alert(c.checklistMissing, c.checklistBody);
@@ -2593,7 +3184,7 @@ function SafetyScreen({ lang, data, updateData }: { lang: Lang; data: AppData; u
       {items.map((x) => <Pressable key={x.id} style={s.checkRow} onPress={() => setItems(items.map((i) => i.id === x.id ? { ...i, done: !i.done } : i))}><Text style={x.done ? s.checkDone : s.checkBox}>{x.done ? "✓" : "○"}</Text><Text style={s.flex}>{x.text}</Text></Pressable>)}
       <TextInput value={responsible} onChangeText={setResponsible} placeholder={c.checkResponsible} style={s.field} />
       <Text style={s.label}>{c.fingerSignature}</Text>
-      <View style={s.signaturePad} {...pan.panHandlers}>{signature.map((p, i) => <View key={i} style={[s.signatureDot, { left: p.x, top: p.y }]} />)}{signature.length === 0 && <Text style={s.signatureHint}>{c.signHere}</Text>}</View>
+      <SignaturePad value={signature} hint={c.signHere} onChange={setSignature} />
       <Pressable style={s.outlineInline} onPress={() => setSignature([])}><Text style={s.outlineText}>{c.clearSignature}</Text></Pressable>
       <Pressable style={s.primary} onPress={saveChecklist}><Text style={s.primaryText}>{c.finish}</Text></Pressable>
     </View>
@@ -2615,76 +3206,15 @@ function ProfileScreen({
   lang,
   setLang,
   activeRole,
-  data,
-  updateData,
   logout,
 }: {
   t: UiCopy;
   lang: Lang;
   setLang: (v: Lang) => void;
   activeRole?: (typeof roles)[number];
-  data: AppData;
-  updateData: (d: AppData) => void;
   logout: () => Promise<void>;
 }) {
-  const c = lang === "uz" ? {
-    backupDialog: "StroyControl zaxira nusxasi", copyCreated: "Nusxa yaratildi", error: "Xato",
-    exportError: "Zaxira nusxasini yaratib bo'lmadi.", invalidFile: "Noto'g'ri fayl",
-    invalidBackup: "Bu StroyControl 0.7 zaxira nusxasi emas.", ready: "Tayyor",
-    restored: "Ma'lumotlar zaxira nusxasidan tiklandi.", damaged: "Fayl buzilgan yoki formati noto'g'ri.",
-    backup: "Zaxira nusxasi", backupBody: "Barcha mahalliy ma'lumotlarni faylga saqlang yoki qayta o'rnatgandan keyin tiklang.",
-    export: "Ma'lumotlarni eksport qilish", restore: "Fayldan tiklash", logout: "Hisobdan chiqish",
-  } : lang === "en" ? {
-    backupDialog: "StroyControl backup", copyCreated: "Backup created", error: "Error",
-    exportError: "Could not create a backup.", invalidFile: "Invalid file",
-    invalidBackup: "This is not a StroyControl 0.7 backup.", ready: "Done",
-    restored: "Data restored from the backup.", damaged: "The file is damaged or has an invalid format.",
-    backup: "Backup", backupBody: "Save all local data to a file or restore it after reinstalling the app.",
-    export: "Export data", restore: "Restore from file", logout: "Sign out",
-  } : {
-    backupDialog: "Резервная копия StroyControl", copyCreated: "Копия создана", error: "Ошибка",
-    exportError: "Не удалось создать резервную копию.", invalidFile: "Неверный файл",
-    invalidBackup: "Это не резервная копия StroyControl 0.7.", ready: "Готово",
-    restored: "Данные восстановлены из резервной копии.", damaged: "Файл поврежден или имеет неверный формат.",
-    backup: "Резервная копия", backupBody: "Сохрани все локальные данные в файл или восстанови их после переустановки.",
-    export: "Экспортировать данные", restore: "Восстановить из файла", logout: "Выйти из аккаунта",
-  };
-  const exportBackup = async () => {
-    try {
-      const uri = `${FileSystem.cacheDirectory}StroyControl-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      await FileSystem.writeAsStringAsync(uri, JSON.stringify(createBackup(data), null, 2));
-      if (await Sharing.isAvailableAsync())
-        await Sharing.shareAsync(uri, {
-          mimeType: "application/json",
-          dialogTitle: c.backupDialog,
-        });
-      else Alert.alert(c.copyCreated, uri);
-    } catch {
-      Alert.alert(c.error, c.exportError);
-    }
-  };
-  const importBackup = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "application/json",
-        copyToCacheDirectory: true,
-      });
-      const asset = !result.canceled ? result.assets[0] : undefined;
-      if (!asset) return;
-      const restored = validateBackup(
-        JSON.parse(await FileSystem.readAsStringAsync(asset.uri)),
-      );
-      if (!restored)
-        return Alert.alert(
-          c.invalidFile,
-          c.invalidBackup,
-        );
-      updateData(restored);
-      Alert.alert(c.ready, c.restored);
-    } catch {
-      Alert.alert(c.error, c.damaged);
-    }
-  };
+  const logoutLabel = lang === "uz" ? "Hisobdan chiqish" : lang === "en" ? "Sign out" : "Выйти из аккаунта";
   return (
     <View>
       <Text style={s.h1}>{t.profile}</Text>
@@ -2709,18 +3239,8 @@ function ProfileScreen({
           ))}
         </View>
       </View>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>{c.backup}</Text>
-        <Text style={s.muted}>{c.backupBody}</Text>
-        <Pressable style={s.primary} onPress={exportBackup}>
-          <Text style={s.primaryText}>{c.export}</Text>
-        </Pressable>
-        <Pressable style={s.outlineInline} onPress={importBackup}>
-          <Text style={s.outlineText}>{c.restore}</Text>
-        </Pressable>
-      </View>
       <Pressable style={s.outline} onPress={() => void logout()}>
-        <Text style={s.outlineText}>{c.logout}</Text>
+        <Text style={s.outlineText}>{logoutLabel}</Text>
       </Pressable>
     </View>
   );
@@ -2773,16 +3293,23 @@ function Metric({
   value,
   label,
   bad,
+  onPress,
 }: {
   value: string;
   label: string;
   bad?: boolean;
+  onPress?: () => void;
 }) {
   return (
-    <View style={s.metric}>
+    <Pressable
+      style={({ pressed }) => [s.metric, pressed && onPress && s.metricPressed]}
+      onPress={onPress}
+      accessibilityRole={onPress ? "link" : undefined}
+      accessibilityLabel={`${label}: ${value}`}
+    >
       <Text style={[s.metricValue, bad && s.bad]}>{value}</Text>
       <Text style={s.metricLabel}>{label}</Text>
-    </View>
+    </Pressable>
   );
 }
 function Line({ k, v, bad }: { k: string; v: string; bad?: boolean }) {
@@ -2809,26 +3336,31 @@ const s = StyleSheet.create({
     borderColor: "#e1e4df",
   },
   headerRight: { flexDirection: "row", gap: 7, alignItems: "center" },
-  bell: { width: 32, height: 32, borderRadius: 10, backgroundColor: "#fff", borderWidth: 1, borderColor: "#dbe0dc", alignItems: "center", justifyContent: "center" },
+  bell: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: "#dbe0dc", alignItems: "center", justifyContent: "center" },
   bellText: { color: "#135f4b", fontSize: 16, fontWeight: "900" },
   badge: { position: "absolute", right: -5, top: -5, minWidth: 17, height: 17, borderRadius: 9, backgroundColor: "#b63b32", color: "#fff", fontSize: 9, fontWeight: "900", textAlign: "center", lineHeight: 17 },
   brand: { color: "#135f4b", fontWeight: "900", fontSize: 18 },
   brandBig: { color: "#135f4b", fontWeight: "900", fontSize: 22 },
-  roleText: { color: "#707a75", fontSize: 11, marginTop: 2 },
+  roleText: { color: "#5f6964", fontSize: 12, lineHeight: 16, marginTop: 2 },
   lang: {
     backgroundColor: "#fff",
+    minWidth: 44,
+    minHeight: 44,
     paddingHorizontal: 9,
-    paddingVertical: 6,
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 9,
     borderWidth: 1,
     borderColor: "#dbe0dc",
   },
-  langText: { fontWeight: "800", fontSize: 11, color: "#135f4b" },
+  langText: { fontWeight: "800", fontSize: 12, color: "#135f4b" },
+  offlineBar: { backgroundColor: "#f8e4d0", paddingHorizontal: 16, paddingVertical: 8, alignItems: "center", borderBottomWidth: 1, borderBottomColor: "#efcda9" },
+  offlineText: { color: "#8a3f16", fontSize: 13, fontWeight: "800" },
   connection: {
     paddingHorizontal: 8,
     paddingVertical: 5,
     borderRadius: 10,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "800",
   },
   ok: { backgroundColor: "#dcefe7", color: "#135f4b" },
@@ -2839,11 +3371,12 @@ const s = StyleSheet.create({
     backgroundColor: "#fff",
     borderTopWidth: 1,
     borderColor: "#dde1de",
-    paddingBottom: 5,
+    paddingBottom: 6,
+    minHeight: 58,
   },
-  nav: { flex: 1, alignItems: "center", paddingVertical: 7 },
-  navIcon: { fontSize: 16, color: "#8a938f" },
-  navText: { fontSize: 8, color: "#8a938f", marginTop: 2 },
+  nav: { flex: 1, minHeight: 52, alignItems: "center", justifyContent: "center", paddingVertical: 6 },
+  navIcon: { fontSize: 18, lineHeight: 20, color: "#707a75" },
+  navText: { fontSize: 10, lineHeight: 13, color: "#707a75", marginTop: 2 },
   navActive: { color: "#135f4b", fontWeight: "800" },
   loginHead: {
     padding: 18,
@@ -2855,12 +3388,12 @@ const s = StyleSheet.create({
   h1: { fontSize: 24, fontWeight: "900", color: "#17211d", marginBottom: 7 },
   eyebrow: {
     color: "#135f4b",
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     marginBottom: 6,
   },
-  muted: { color: "#707a75", fontSize: 12, lineHeight: 17 },
+  muted: { color: "#5f6964", fontSize: 13, lineHeight: 19 },
   noticeDanger: { borderLeftWidth: 4, borderLeftColor: "#b63b32" },
   noticeWarning: { borderLeftWidth: 4, borderLeftColor: "#d18a25" },
   noticeInfo: { borderLeftWidth: 4, borderLeftColor: "#168167" },
@@ -2886,7 +3419,8 @@ const s = StyleSheet.create({
   avatarText: { fontWeight: "900", fontSize: 12, color: "#135f4b" },
   cardTitle: {
     fontWeight: "800",
-    fontSize: 15,
+    fontSize: 16,
+    lineHeight: 21,
     color: "#202925",
     marginBottom: 3,
   },
@@ -2897,10 +3431,10 @@ const s = StyleSheet.create({
     borderRadius: 9,
     padding: 2,
   },
-  switchBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 7 },
+  switchBtn: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 7, alignItems: "center", justifyContent: "center" },
   switchActive: { backgroundColor: "#135f4b" },
-  switchText: { fontWeight: "800", fontSize: 11, color: "#69736f" },
-  switchTextActive: { fontWeight: "800", fontSize: 11, color: "#fff" },
+  switchText: { fontWeight: "800", fontSize: 12, color: "#5f6964" },
+  switchTextActive: { fontWeight: "800", fontSize: 12, color: "#fff" },
   metrics: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2915,8 +3449,9 @@ const s = StyleSheet.create({
     borderRadius: 13,
     padding: 13,
   },
+  metricPressed: { opacity: 0.72 },
   metricValue: { fontWeight: "900", fontSize: 23, color: "#17211d" },
-  metricLabel: { fontSize: 11, color: "#707a75", marginTop: 3 },
+  metricLabel: { fontSize: 12, lineHeight: 16, color: "#5f6964", marginTop: 3 },
   quickGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   quickAction: {
     width: "48%",
@@ -2946,6 +3481,16 @@ const s = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
+  emptyState: { backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#e0e4e1", padding: 22, marginBottom: 10, alignItems: "center" },
+  cameraNotice: { backgroundColor: "#fff0d9", borderRadius: 12, padding: 12, marginTop: 12 },
+  cameraNoticeText: { color: "#8a5714", fontWeight: "800", lineHeight: 18 },
+  cameraCard: { backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#e0e4e1", padding: 12, marginBottom: 10 },
+  cameraPreview: { height: 150, borderRadius: 11, backgroundColor: "#17211d", alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  cameraPreviewIcon: { color: "#8ca39a", fontSize: 34, marginBottom: 8 },
+  cameraWaiting: { color: "#d6e8e1", fontSize: 12, fontWeight: "800" },
+  emptyIcon: { color: "#168167", fontSize: 26, fontWeight: "900", marginBottom: 7 },
+  projectMeta: { flexDirection: "row", gap: 12, borderTopWidth: 1, borderTopColor: "#ecefec", paddingTop: 11, marginTop: 3 },
+  projectMetaValue: { color: "#202925", fontSize: 12, fontWeight: "800" },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -2953,7 +3498,7 @@ const s = StyleSheet.create({
     gap: 8,
   },
   risk: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "900",
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -2978,7 +3523,7 @@ const s = StyleSheet.create({
     marginVertical: 16,
   },
   heroValue: { color: "#fff", fontSize: 36, fontWeight: "900" },
-  heroLabel: { color: "#bdd8cf", fontSize: 12 },
+  heroLabel: { color: "#d6e8e1", fontSize: 13, lineHeight: 18 },
   line: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -2992,14 +3537,33 @@ const s = StyleSheet.create({
     maxWidth: "58%",
     textAlign: "right",
   },
+  detailLinkPressed: { opacity: 0.65 },
+  detailLinkValue: { color: "#176b52", fontWeight: "800" },
   status: {
     color: "#135f4b",
     fontWeight: "800",
-    fontSize: 11,
+    fontSize: 12,
     marginBottom: 8,
   },
+  taskCard: { backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#e0e4e1", padding: 14, marginTop: 10 },
+  taskTitleRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  taskContext: { color: "#5f6964", fontSize: 13, lineHeight: 19, marginTop: 5 },
+  taskMetaRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 12 },
+  taskDue: { color: "#5f6964", fontSize: 12, fontWeight: "700", flex: 1 },
+  taskDueOverdue: { color: "#b63b32", fontWeight: "900" },
+  taskAssignee: { color: "#5f6964", fontSize: 12, lineHeight: 18, marginTop: 8 },
+  taskStatus: { overflow: "hidden", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, fontSize: 11, fontWeight: "900" },
+  taskStatus_open: { backgroundColor: "#edf0ed", color: "#59635f" },
+  taskStatus_in_progress: { backgroundColor: "#e3eef8", color: "#285d8a" },
+  taskStatus_review: { backgroundColor: "#fff0d9", color: "#8a5714" },
+  taskStatus_done: { backgroundColor: "#dcefe7", color: "#135f4b" },
+  taskSummary: { backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: "#d8e0dc", padding: 15, marginBottom: 14 },
+  taskSummaryDue: { color: "#46504c", fontSize: 12, fontWeight: "800", flex: 1, textAlign: "right" },
+  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  progressBadge: { color: "#135f4b", backgroundColor: "#e2f1eb", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, fontSize: 11, fontWeight: "900" },
+  successBadge: { color: "#135f4b", backgroundColor: "#e2f1eb", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, fontSize: 10, fontWeight: "900" },
   label: {
-    fontSize: 10,
+    fontSize: 12,
     color: "#8a938f",
     fontWeight: "800",
     textTransform: "uppercase",
@@ -3009,6 +3573,7 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#135f4b",
     borderRadius: 12,
+    minHeight: 48,
     padding: 13,
     alignItems: "center",
   },
@@ -3016,6 +3581,7 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#135f4b",
     borderRadius: 10,
+    minHeight: 44,
     padding: 10,
     alignItems: "center",
     marginTop: 10,
@@ -3024,16 +3590,17 @@ const s = StyleSheet.create({
   filters: { marginVertical: 10 },
   filter: {
     paddingHorizontal: 13,
-    paddingVertical: 8,
+    minHeight: 44,
+    paddingVertical: 11,
     backgroundColor: "#e5e8e5",
     borderRadius: 10,
     marginRight: 7,
   },
   filterActive: { backgroundColor: "#135f4b" },
-  filterText: { fontSize: 11, fontWeight: "800", color: "#69736f" },
-  filterTextActive: { fontSize: 11, fontWeight: "800", color: "#fff" },
+  filterText: { fontSize: 12, fontWeight: "800", color: "#5f6964" },
+  filterTextActive: { fontSize: 12, fontWeight: "800", color: "#fff" },
   priority: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: "900",
     color: "#59635f",
     backgroundColor: "#edf0ed",
@@ -3066,6 +3633,8 @@ const s = StyleSheet.create({
     color: "#fff",
   },
   checkDone: { backgroundColor: "#168167", borderColor: "#168167" },
+  checkCompleted: { backgroundColor: "#f0f7f4", borderColor: "#b9d8cc" },
+  requiredHint: { color: "#9a631d", fontSize: 10, fontWeight: "800", marginTop: 3, textTransform: "uppercase" },
   checkRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
   signaturePad: { height: 130, backgroundColor: "#f8faf8", borderWidth: 1, borderColor: "#cfd7d2", borderRadius: 10, overflow: "hidden", marginVertical: 8 },
   signatureDot: { position: "absolute", width: 5, height: 5, borderRadius: 3, backgroundColor: "#17211d" },
@@ -3074,22 +3643,25 @@ const s = StyleSheet.create({
   primary: {
     backgroundColor: "#135f4b",
     borderRadius: 12,
+    minHeight: 48,
     padding: 15,
     alignItems: "center",
     marginTop: 8,
   },
-  primaryText: { color: "#fff", fontWeight: "900" },
-  queue: { fontSize: 11, color: "#707a75", textAlign: "center", marginTop: 10 },
+  primaryText: { color: "#fff", fontWeight: "900", fontSize: 14 },
+  queue: { fontSize: 12, lineHeight: 17, color: "#5f6964", textAlign: "center", marginTop: 10 },
   photo: { width: "100%", height: 220, borderRadius: 10, marginBottom: 8, backgroundColor: "#eef1ee" },
+  photoState: { alignItems: "center", justifyContent: "center", gap: 10 },
+  photoError: { color: "#b63b32", fontWeight: "800" },
+  photoRetry: { minHeight: 40, borderWidth: 1, borderColor: "#135f4b", borderRadius: 9, paddingHorizontal: 14, paddingVertical: 9 },
+  photoEmpty: { minHeight: 120, borderWidth: 1, borderStyle: "dashed", borderColor: "#aebbb5", borderRadius: 12, alignItems: "center", justifyContent: "center", marginVertical: 10, backgroundColor: "#f7f9f7" },
+  photoEmptyIcon: { color: "#168167", fontSize: 30, lineHeight: 34 },
+  photoEmptyText: { color: "#5f6964", fontWeight: "800", marginTop: 4 },
   photoViewer: { flex: 1, backgroundColor: "rgba(0,0,0,0.96)" },
   photoViewerContent: { flex: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   photoViewerImage: { width: "100%", height: "100%" },
   photoViewerClose: { position: "absolute", zIndex: 2, right: 16, top: 42, width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.18)" },
   photoViewerCloseText: { color: "#fff", fontSize: 34, lineHeight: 38 },
-  photoViewerControls: { position: "absolute", bottom: 34, alignSelf: "center", flexDirection: "row", gap: 12, padding: 8, borderRadius: 28, backgroundColor: "rgba(255,255,255,0.16)" },
-  photoViewerControl: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.4)" },
-  photoViewerControlText: { color: "#fff", fontSize: 30, lineHeight: 34, fontWeight: "700" },
-  photoViewerResetText: { color: "#fff", fontSize: 15, fontWeight: "800" },
   geoCard: {
     backgroundColor: "#eef7f3",
     borderWidth: 1,
@@ -3103,6 +3675,7 @@ const s = StyleSheet.create({
   geoButton: {
     backgroundColor: "#135f4b",
     borderRadius: 10,
+    minHeight: 48,
     paddingVertical: 11,
     paddingHorizontal: 12,
     alignItems: "center",
@@ -3116,11 +3689,17 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#b63b32",
     borderRadius: 12,
+    minHeight: 48,
     padding: 15,
     alignItems: "center",
     marginTop: 8,
   },
   dangerText: { color: "#b63b32", fontWeight: "900" },
+  dangerInline: { borderWidth: 1, borderColor: "#d9a29d", borderRadius: 10, minHeight: 42, padding: 10, alignItems: "center", marginBottom: 12 },
+  mainActionPanel: { backgroundColor: "#e8f3ee", borderRadius: 14, padding: 12, marginTop: 12, borderWidth: 1, borderColor: "#b9d8cc" },
+  actionCaption: { color: "#135f4b", fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
+  dangerZone: { borderTopWidth: 1, borderTopColor: "#ead3d0", marginTop: 18, paddingTop: 12 },
+  dangerCaption: { color: "#9a5b54", fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
   note: {
     backgroundColor: "#eef1ef",
     padding: 12,
@@ -3149,10 +3728,10 @@ const s = StyleSheet.create({
     padding: 3,
     marginVertical: 10,
   },
-  segmentBtn: { flex: 1, padding: 9, alignItems: "center", borderRadius: 9 },
+  segmentBtn: { flex: 1, minHeight: 44, padding: 10, alignItems: "center", justifyContent: "center", borderRadius: 9 },
   segmentActive: { backgroundColor: "#135f4b" },
-  segmentText: { fontSize: 11, fontWeight: "800", color: "#69736f" },
-  segmentTextActive: { fontSize: 11, fontWeight: "800", color: "#fff" },
+  segmentText: { fontSize: 12, fontWeight: "800", color: "#5f6964" },
+  segmentTextActive: { fontSize: 12, fontWeight: "800", color: "#fff" },
   input: {
     backgroundColor: "#fff",
     borderWidth: 1,
@@ -3164,6 +3743,24 @@ const s = StyleSheet.create({
     marginBottom: 8,
   },
   dateBlock: { marginBottom: 8 },
+  dateValue: { color: "#202925", fontSize: 16, fontWeight: "700" },
+  datePlaceholder: { color: "#8a938f", fontSize: 16 },
+  calendarOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.48)", justifyContent: "center", padding: 18 },
+  calendarCard: { backgroundColor: "#fff", borderRadius: 18, padding: 16 },
+  calendarHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginVertical: 12 },
+  calendarArrow: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: "#e8f3ee" },
+  calendarArrowText: { color: "#135f4b", fontSize: 30, lineHeight: 34, fontWeight: "800" },
+  calendarMonth: { color: "#202925", fontSize: 16, fontWeight: "900", textTransform: "capitalize" },
+  calendarGrid: { flexDirection: "row", flexWrap: "wrap" },
+  calendarWeekday: { width: "14.2857%", textAlign: "center", color: "#8a938f", fontSize: 11, fontWeight: "800", paddingVertical: 8 },
+  calendarDay: { width: "14.2857%", aspectRatio: 1, alignItems: "center", justifyContent: "center", borderRadius: 20 },
+  calendarDaySelected: { backgroundColor: "#135f4b" },
+  calendarDayToday: { borderWidth: 1, borderColor: "#168167" },
+  calendarDayText: { color: "#202925", fontWeight: "700" },
+  calendarDayTextSelected: { color: "#fff" },
+  calendarDayDisabled: { color: "#c5cbc8" },
+  calendarTimeRow: { marginTop: 12 },
+  timeField: { backgroundColor: "#f7f8f6", borderWidth: 1, borderColor: "#dce1dd", borderRadius: 10, padding: 11, fontSize: 16 },
   dateRow: { flexDirection: "row", alignItems: "center" },
   datePart: {
     width: 64,
@@ -3197,7 +3794,8 @@ const s = StyleSheet.create({
     backgroundColor: "#135f4b",
     borderRadius: 10,
     paddingHorizontal: 15,
-    paddingVertical: 10,
+    minHeight: 44,
+    paddingVertical: 11,
   },
   thread: { marginLeft: 20, borderLeftWidth: 3, borderLeftColor: "#168167" },
   message: {

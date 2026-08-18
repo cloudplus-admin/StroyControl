@@ -10,6 +10,7 @@ build/
 *.jks
 *.keystore
 mobile/app/android/
+mobile/app/build-artifacts/
 *.tsbuildinfo
 backend/uploads/
 backups/

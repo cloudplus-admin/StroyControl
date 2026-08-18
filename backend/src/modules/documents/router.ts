@@ -8,6 +8,7 @@ type Auth = { companyId: string; userId: string; roles: { code: string; objectId
 const canAccess = (auth: Auth, objectId: string) => auth.roles.some((role) => role.objectId === null || role.objectId === objectId);
 const canManage = (auth: Auth, objectId: string) => auth.roles.some((role) => ['admin', 'owner', 'pm', 'foreman'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
 const canDecide = (auth: Auth, objectId: string) => auth.roles.some((role) => ['admin', 'owner', 'pm', 'inspector', 'customer'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
+const canSignAct = (auth: Auth, objectId: string) => auth.roles.some((role) => ['inspector', 'customer'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
 
 export const documentsRouter = Router();
 
@@ -76,7 +77,7 @@ documentsRouter.post('/acts/:id/sign', asyncRoute(async (req, res) => {
   const auth = res.locals.auth as Auth;
   const act = await prisma.workAct.findFirst({ where: { id: req.params.id, companyId: auth.companyId } });
   if (!act) return res.status(404).json({ error: 'not_found' });
-  if (!canDecide(auth, act.objectId)) return res.status(403).json({ error: 'forbidden' });
+  if (!canSignAct(auth, act.objectId)) return res.status(403).json({ error: 'forbidden' });
   if (act.status !== 'review') return res.status(409).json({ error: 'invalid_state' });
   const signed = await prisma.$transaction(async (tx) => {
     const updated = await tx.workAct.update({ where: { id: act.id }, data: { status: 'signed', signedById: auth.userId, signedAt: new Date() } });

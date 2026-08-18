@@ -71,6 +71,8 @@ model Object {
   nameUz       String?  @map("name_uz")
   address      String?
   addressUz    String?  @map("address_uz")
+  latitude     Float?
+  longitude    Float?
   templateCode String?  @map("template_code")
   status       String   @default("active")
   createdAt    DateTime @default(now()) @map("created_at")
