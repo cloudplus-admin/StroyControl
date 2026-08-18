@@ -29,8 +29,11 @@ export const createDefectSchema = z.object({
   taskId: z.string().uuid().optional(),
   reportedBy: z.string().uuid(),
   description: z.string().min(1).max(2000),
+  beforePhotos: z.array(z.string().url()).min(1).max(20),
+  dueAt: z.coerce.date().optional(),
 });
 
 export const updateDefectSchema = z.object({
   status: z.enum(['open', 'in_progress', 'verified', 'closed']),
+  afterPhotos: z.array(z.string().url()).max(20).optional(),
 });

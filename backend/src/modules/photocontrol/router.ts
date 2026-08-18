@@ -42,6 +42,7 @@ photocontrolRouter.post('/objects/:objectId/photo-reports', async (req, res, nex
     const input = createPhotoReportSchema.parse(req.body);
     if (input.kind === 'hidden_works' && !canAccess(res, req.params.objectId, ['admin', 'owner', 'pm', 'inspector'])) return res.status(403).json({ error: 'forbidden' });
     const report = await photocontrolService.createPhotoReport(companyId, req.params.objectId, { ...input, authorId: (res.locals.auth as Auth | undefined)?.userId ?? input.authorId });
+    if (report === 'incomplete_angles') return res.status(422).json({ error: 'incomplete_angles' });
     if (!report) return res.status(404).json({ error: 'not_found' });
     res.status(201).json(report);
   } catch (err) {
@@ -128,7 +129,9 @@ photocontrolRouter.patch('/defects/:id', async (req, res, next) => {
     const defectRecord = await prisma.defect.findFirst({ where: { id: req.params.id, object: { companyId } }, select: { objectId: true } });
     if (!defectRecord || !canAccess(res, defectRecord.objectId, ['admin', 'owner', 'pm', 'foreman', 'inspector'])) return res.status(403).json({ error: 'forbidden' });
     const input = updateDefectSchema.parse(req.body);
-    const defect = await photocontrolService.updateDefectStatus(companyId, req.params.id, input.status);
+    const defect = await photocontrolService.updateDefectStatus(companyId, req.params.id, input.status, input.afterPhotos);
+    if (defect === 'invalid_transition') return res.status(409).json({ error: 'invalid_transition' });
+    if (defect === 'after_photos_required') return res.status(422).json({ error: 'after_photos_required' });
     if (!defect) return res.status(404).json({ error: 'not_found' });
     res.json(defect);
   } catch (err) {

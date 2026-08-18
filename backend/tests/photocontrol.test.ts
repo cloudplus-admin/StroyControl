@@ -116,7 +116,7 @@ describe('Defects (журнал замечаний)', () => {
     const createRes = await request(app)
       .post(`/api/objects/${object.id}/defects`)
       .set('x-company-id', company.id)
-      .send({ reportedBy: user.id, description: 'Отсутствие СИЗ у рабочих на 6 этаже' });
+      .send({ reportedBy: user.id, description: 'Отсутствие СИЗ у рабочих на 6 этаже', beforePhotos: ['https://example.com/before.jpg'] });
     expect(createRes.status).toBe(201);
     expect(createRes.body.status).toBe('open');
 
@@ -136,12 +136,42 @@ describe('Defects (журнал замечаний)', () => {
     const createRes = await request(app)
       .post(`/api/objects/${object.id}/defects`)
       .set('x-company-id', company.id)
-      .send({ reportedBy: user.id, description: 'Неровность кладки' });
+      .send({ reportedBy: user.id, description: 'Неровность кладки', beforePhotos: ['https://example.com/before.jpg'] });
 
     const updateRes = await request(app)
       .patch(`/api/defects/${createRes.body.id}`)
       .set('x-company-id', company.id)
       .send({ status: 'not_a_real_status' });
     expect(updateRes.status).toBe(400);
+  });
+
+  it('requires complete angles and defect before/after evidence', async () => {
+    const { company, object, user } = await seedCompanyWithObjectAndUser();
+    const incomplete = await request(app)
+      .post(`/api/objects/${object.id}/photo-reports`)
+      .set('x-company-id', company.id)
+      .send({ authorId: user.id, fileUrl: 'https://example.com/front.jpg', requiredAngles: ['front', 'side'], photos: [{ angle: 'front', uri: 'https://example.com/front.jpg' }] });
+    expect(incomplete.status).toBe(422);
+    expect(incomplete.body.error).toBe('incomplete_angles');
+
+    const noBefore = await request(app)
+      .post(`/api/objects/${object.id}/defects`)
+      .set('x-company-id', company.id)
+      .send({ reportedBy: user.id, description: 'Дефект без фото' });
+    expect(noBefore.status).toBe(400);
+
+    const created = await request(app)
+      .post(`/api/objects/${object.id}/defects`)
+      .set('x-company-id', company.id)
+      .send({ reportedBy: user.id, description: 'Трещина', beforePhotos: ['https://example.com/before.jpg'] });
+    const skipped = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'verified' });
+    expect(skipped.status).toBe(409);
+    await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'in_progress' }).expect(200);
+    const withoutAfter = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'verified' });
+    expect(withoutAfter.status).toBe(422);
+    const verified = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'verified', afterPhotos: ['https://example.com/after.jpg'] });
+    expect(verified.status).toBe(200);
+    const closed = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'closed' });
+    expect(closed.body.resolvedAt).toBeTruthy();
   });
 });

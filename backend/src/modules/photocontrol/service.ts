@@ -26,6 +26,14 @@ export async function createPhotoReport(
 ) {
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!object) return null;
+  const author = await prisma.user.findFirst({ where: { id: input.authorId, companyId } });
+  if (!author) return null;
+  if (input.taskId) {
+    const task = await prisma.task.findFirst({ where: { id: input.taskId, workSection: { stage: { objectId } } } });
+    if (!task) return null;
+  }
+  const suppliedAngles = new Set((input.photos ?? []).map((photo) => photo.angle));
+  if ((input.requiredAngles ?? []).some((angle) => !suppliedAngles.has(angle))) return 'incomplete_angles' as const;
   return prisma.photoReport.create({ data: { objectId, ...input } });
 }
 
@@ -71,17 +79,27 @@ export async function listDefects(companyId: string, objectId: string) {
 export async function createDefect(
   companyId: string,
   objectId: string,
-  input: { taskId?: string; reportedBy: string; description: string },
+  input: { taskId?: string; reportedBy: string; description: string; beforePhotos: string[]; dueAt?: Date },
 ) {
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
   if (!object) return null;
+  const reporter = await prisma.user.findFirst({ where: { id: input.reportedBy, companyId } });
+  if (!reporter) return null;
+  if (input.taskId) {
+    const task = await prisma.task.findFirst({ where: { id: input.taskId, workSection: { stage: { objectId } } } });
+    if (!task) return null;
+  }
   return prisma.defect.create({ data: { objectId, ...input } });
 }
 
-export async function updateDefectStatus(companyId: string, defectId: string, status: string) {
+export async function updateDefectStatus(companyId: string, defectId: string, status: string, afterPhotos?: string[]) {
   const defect = await prisma.defect.findFirst({ where: { id: defectId, object: { companyId } } });
   if (!defect) return null;
-  const updated = await prisma.defect.update({ where: { id: defectId }, data: { status } });
+  const allowed: Record<string, string[]> = { open: ['in_progress'], in_progress: ['verified'], verified: ['closed', 'in_progress'], closed: [] };
+  if (!allowed[defect.status]?.includes(status)) return 'invalid_transition' as const;
+  const existingAfter = Array.isArray(defect.afterPhotos) ? defect.afterPhotos : [];
+  if (status === 'verified' && !(afterPhotos?.length || existingAfter.length)) return 'after_photos_required' as const;
+  const updated = await prisma.defect.update({ where: { id: defectId }, data: { status, ...(afterPhotos ? { afterPhotos } : {}), resolvedAt: status === 'closed' ? new Date() : null } });
   await createSystemEvent(
     defect.objectId,
     'status_change',
