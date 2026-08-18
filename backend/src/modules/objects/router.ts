@@ -93,6 +93,19 @@ objectsRouter.get('/:id/gantt', async (req, res, next) => {
   }
 });
 
+objectsRouter.post('/:id/baseline', requireAnyRole('admin', 'owner', 'pm'), async (req, res, next) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+    if (!canAccessObject(res, req.params.id)) return res.status(404).json({ error: 'not_found' });
+    const result = await objectsService.captureBaseline(companyId, req.params.id);
+    if (!result) return res.status(404).json({ error: 'not_found' });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 objectsRouter.post('/:id/stages', requireAnyRole('admin', 'owner', 'pm'), async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
@@ -129,9 +142,10 @@ objectsRouter.post('/sections/:sectionId/tasks', requireAnyRole('admin', 'owner'
     const section = await prisma.workSection.findFirst({ where: { id: req.params.sectionId, stage: { object: { companyId } } }, select: { stage: { select: { objectId: true } } } });
     if (!section || !canAccessObject(res, section.stage.objectId)) return res.status(404).json({ error: 'not_found' });
     const input = createTaskSchema.parse(req.body);
-    const task = await objectsService.addTask(companyId, req.params.sectionId, input);
-    if (!task) return res.status(404).json({ error: 'not_found' });
-    res.status(201).json(task);
+    const result = await objectsService.addTask(companyId, req.params.sectionId, input);
+    if (!result) return res.status(404).json({ error: 'not_found' });
+    if (result.kind === 'invalid_dependencies') return res.status(400).json({ error: 'invalid_dependencies' });
+    res.status(201).json(result.task);
   } catch (err) {
     if (handleZodError(err, res, next)) return;
   }
