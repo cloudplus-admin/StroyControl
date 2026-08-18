@@ -55,6 +55,7 @@ jobs:
       - run: npm install
       - run: npm run lint --if-present
       - run: npm run build
+      - run: npm test
 
   mobile-apk:
     runs-on: ubuntu-latest
@@ -69,6 +70,9 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/app/package-lock.json
       - run: npm install
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx expo-doctor
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
