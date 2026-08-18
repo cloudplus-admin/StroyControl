@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    include: ['src/**/*.test.{ts,tsx}'],
   },
   server: { host: '127.0.0.1', port: 48031 },
   preview: { host: '127.0.0.1', port: 48031 },

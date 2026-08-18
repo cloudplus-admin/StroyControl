@@ -14,3 +14,5 @@ mobile/app/build-artifacts/
 *.tsbuildinfo
 backend/uploads/
 backups/
+web/test-results/
+web/playwright-report/
