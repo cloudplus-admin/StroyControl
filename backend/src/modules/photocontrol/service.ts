@@ -21,7 +21,6 @@ export async function createPhotoReport(
     status?: string;
     geoLat?: number;
     geoLng?: number;
-    inspectorSignature?: string;
   },
 ) {
   const object = await prisma.object.findFirst({ where: { id: objectId, companyId } });
@@ -37,12 +36,12 @@ export async function createPhotoReport(
   return prisma.photoReport.create({ data: { objectId, ...input } });
 }
 
-export async function reviewPhotoReport(companyId: string, reportId: string, input: { decision: 'accepted' | 'rejected'; note: string; inspectorSignature: string }) {
+export async function reviewPhotoReport(companyId: string, reportId: string, input: { decision: 'accepted' | 'rejected'; note: string }) {
   const report = await prisma.photoReport.findFirst({ where: { id: reportId, object: { companyId } } });
   if (!report) return null;
   return prisma.photoReport.update({
     where: { id: reportId },
-    data: { status: input.decision, inspectorNote: input.note || null, inspectorSignature: input.inspectorSignature, reviewedAt: new Date() },
+    data: { status: input.decision, inspectorNote: input.note || null, reviewedAt: new Date() },
   });
 }
 

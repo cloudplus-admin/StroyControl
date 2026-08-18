@@ -43,28 +43,12 @@ describe('Photo reports', () => {
     expect(listRes.body.length).toBe(1);
   });
 
-  it('requires inspector signature for hidden_works photos', async () => {
+  it('accepts hidden_works photos without a signature', async () => {
     const { company, object, user } = await seedCompanyWithObjectAndUser();
     const res = await request(app)
       .post(`/api/objects/${object.id}/photo-reports`)
       .set('x-company-id', company.id)
       .send({ authorId: user.id, fileUrl: 'https://example.com/1.jpg', kind: 'hidden_works', requiredAngles: ['overview'], photos: [{ angle: 'overview', uri: 'https://example.com/1.jpg' }] });
-    expect(res.status).toBe(400);
-  });
-
-  it('accepts hidden_works photos with a signature', async () => {
-    const { company, object, user } = await seedCompanyWithObjectAndUser();
-    const res = await request(app)
-      .post(`/api/objects/${object.id}/photo-reports`)
-      .set('x-company-id', company.id)
-      .send({
-        authorId: user.id,
-        fileUrl: 'https://example.com/1.jpg',
-        kind: 'hidden_works',
-        requiredAngles: ['overview'],
-        photos: [{ angle: 'overview', uri: 'https://example.com/1.jpg' }],
-        inspectorSignature: 'Г. Мирзаева',
-      });
     expect(res.status).toBe(201);
   });
 
@@ -73,15 +57,16 @@ describe('Photo reports', () => {
     const createRes = await request(app)
       .post(`/api/objects/${object.id}/photo-reports`)
       .set('x-company-id', company.id)
-      .send({ authorId: user.id, fileUrl: 'https://example.com/front.jpg', shootingPoint: 'axis-a', kind: 'hidden_works', status: 'review', requiredAngles: ['front', 'side'], photos: [{ angle: 'front', uri: 'https://example.com/front.jpg' }, { angle: 'side', uri: 'https://example.com/side.jpg' }], inspectorSignature: 'Inspector' });
+      .send({ authorId: user.id, fileUrl: 'https://example.com/front.jpg', shootingPoint: 'axis-a', kind: 'hidden_works', status: 'review', requiredAngles: ['front', 'side'], photos: [{ angle: 'front', uri: 'https://example.com/front.jpg' }, { angle: 'side', uri: 'https://example.com/side.jpg' }] });
     expect(createRes.status).toBe(201);
     expect(createRes.body).toMatchObject({ status: 'review', requiredAngles: ['front', 'side'] });
     const reviewRes = await request(app)
       .post(`/api/photo-reports/${createRes.body.id}/review`)
       .set('x-company-id', company.id)
-      .send({ decision: 'accepted', note: 'ok', inspectorSignature: 'Inspector' });
+      .send({ decision: 'accepted', note: 'ok' });
     expect(reviewRes.status).toBe(200);
-    expect(reviewRes.body).toMatchObject({ status: 'accepted', inspectorNote: 'ok', inspectorSignature: 'Inspector' });
+    expect(reviewRes.body).toMatchObject({ status: 'accepted', inspectorNote: 'ok' });
+    expect(reviewRes.body.inspectorSignature).toBeNull();
   });
 
   it('builds a timeline for a shooting point sorted by date', async () => {
@@ -161,12 +146,6 @@ describe('Defects (журнал замечаний)', () => {
       .set('x-company-id', company.id)
       .send({ authorId: user.id, fileUrl: 'https://example.com/front.jpg', requiredAngles: [], photos: [] });
     expect(emptyAngles.status).toBe(400);
-
-    const unsignedHiddenWorks = await request(app)
-      .post(`/api/objects/${object.id}/photo-reports`)
-      .set('x-company-id', company.id)
-      .send({ authorId: user.id, fileUrl: 'https://example.com/front.jpg', kind: 'hidden_works', status: 'review', requiredAngles: ['front'], photos: [{ angle: 'front', uri: 'https://example.com/front.jpg' }] });
-    expect(unsignedHiddenWorks.status).toBe(400);
 
     const noBefore = await request(app)
       .post(`/api/objects/${object.id}/defects`)
