@@ -4,13 +4,26 @@ import { AppData, QueueItem } from './domain';
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 export const retryDelayMs = (attempts: number) => Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.max(0, attempts - 1));
 
+const SERVER_SYNC_TYPES = new Set<QueueItem['type']>([
+  'task.updated', 'task.closed', 'task.reviewed', 'defect.created', 'defect.updated',
+  'quality.updated', 'quality.reviewed', 'message.created',
+]);
+
+export function isServerSyncQueueItem(item: QueueItem): boolean {
+  return SERVER_SYNC_TYPES.has(item.type);
+}
+
 export async function syncQueue(data: AppData, api: ApiClient, now = Date.now()): Promise<AppData> {
   const queue: QueueItem[] = [];
   const syncedChecklistTasks = new Set<string>();
   let defects = data.defects;
+  let qualityReports = data.qualityReports;
+  let messages = data.messages;
   const defectIds = new Map<string, string>();
+  const qualityIds = new Map<string, string>();
   for (const originalItem of data.queue) {
-    const item = defectIds.has(originalItem.entityId) ? { ...originalItem, entityId: defectIds.get(originalItem.entityId)! } : originalItem;
+    const mappedEntityId = defectIds.get(originalItem.entityId) ?? qualityIds.get(originalItem.entityId);
+    const item = mappedEntityId ? { ...originalItem, entityId: mappedEntityId } : originalItem;
     // Legacy builds could mark checklist entries as conflict/failed before a task
     // was closed. They are obsolete regardless of retry state once the server task
     // is already under review or done, so discard them before the retry guards.
@@ -52,6 +65,77 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
         });
         if (response.status === 409) { queue.push({ ...item, status: 'conflict', lastError: 'sync_idempotency_conflict' }); continue; }
         if (response.status === 401) { queue.push({ ...item, status: 'failed', lastError: 'sync_session_expired' }); continue; }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        continue;
+      } catch (error) {
+        const attempts = item.attempts + 1;
+        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        continue;
+      }
+    }
+    if (item.type === 'message.created') {
+      const message = messages.find((candidate) => candidate.id === item.entityId);
+      const userId = api.getSession()?.user?.id;
+      if (!message || !userId) { queue.push(item); continue; }
+      try {
+        const response = await api.request(`/api/objects/${encodeURIComponent(message.projectId)}/feed`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey },
+          body: JSON.stringify({ authorId: userId, body: message.text, mentionedUserIds: [], ...(message.parentId && /^[0-9a-f-]{36}$/i.test(message.parentId) ? { parentEventId: message.parentId } : {}) }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const created = await response.json() as { id: string; createdAt: string };
+        messages = messages.map((candidate) => candidate.id === item.entityId ? { ...candidate, id: created.id, createdAt: created.createdAt } : candidate);
+        continue;
+      } catch (error) {
+        const attempts = item.attempts + 1;
+        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        continue;
+      }
+    }
+    if (item.type === 'quality.updated') {
+      const report = qualityReports.find((candidate) => candidate.id === item.entityId);
+      const userId = api.getSession()?.user?.id;
+      if (!report || report.status === 'draft') continue;
+      if (!userId) { queue.push(item); continue; }
+      try {
+        const photos = [] as { angle: string; uri: string }[];
+        for (let index = 0; index < report.photos.length; index += 1) {
+          const photo = report.photos[index]!;
+          let uri = photo.uri;
+          if (uri.startsWith('file://') || uri.startsWith('content://')) {
+            const upload = await api.uploadFile('/api/uploads', uri, {
+              'content-type': 'image/jpeg', 'idempotency-key': `${item.idempotencyKey}:photo:${index}`,
+              'x-file-name': `quality-${item.entityId}-${index + 1}.jpg`,
+            });
+            if (!upload.ok) throw new Error(`Upload HTTP ${upload.status}`);
+            uri = (await upload.json() as { url: string }).url;
+          }
+          photos.push({ angle: photo.angle, uri });
+        }
+        const response = await api.request(`/api/objects/${encodeURIComponent(report.projectId)}/photo-reports`, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey },
+          body: JSON.stringify({ taskId: /^[0-9a-f-]{36}$/i.test(report.taskId) ? report.taskId : undefined, authorId: userId, shootingPoint: report.point, kind: report.kind === 'hidden' ? 'hidden_works' : 'progress', fileUrl: photos[0]?.uri, requiredAngles: report.requiredAngles, photos, status: 'review' }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const created = await response.json() as { id: string; createdAt: string };
+        qualityReports = qualityReports.map((candidate) => candidate.id === item.entityId ? { ...candidate, id: created.id, createdAt: created.createdAt, photos } : candidate);
+        qualityIds.set(item.entityId, created.id);
+        continue;
+      } catch (error) {
+        const attempts = item.attempts + 1;
+        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        continue;
+      }
+    }
+    if (item.type === 'quality.reviewed') {
+      const report = qualityReports.find((candidate) => candidate.id === item.entityId);
+      if (!report) { queue.push(item); continue; }
+      try {
+        const response = await api.request(`/api/photo-reports/${encodeURIComponent(report.id)}/review`, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey },
+          body: JSON.stringify({ decision: report.status === 'accepted' ? 'accepted' : 'rejected', note: report.inspectorNote ?? '' }),
+        });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         continue;
       } catch (error) {
@@ -125,5 +209,5 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
       queue.push({ ...current, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
     }
   }
-  return { ...data, defects, queue };
+  return { ...data, defects, qualityReports, messages, queue };
 }

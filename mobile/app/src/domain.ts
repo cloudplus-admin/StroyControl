@@ -201,7 +201,10 @@ export function addQualityPhoto(data: AppData, reportId: string, angle: string, 
   const qualityReports = data.qualityReports.map((report) => report.id !== reportId ? report : {
     ...report, photos: [...report.photos.filter((p) => p.angle !== angle), { angle, uri }]
   });
-  return enqueue({ ...data, qualityReports }, 'quality.updated', reportId);
+  // Photo URIs are already durable in AppData. Queue one server operation only
+  // when the complete report is submitted, otherwise every angle produces an
+  // incomplete API request and blocks reconnect.
+  return { ...data, qualityReports };
 }
 
 export function submitQualityReport(data: AppData, reportId: string): AppData {

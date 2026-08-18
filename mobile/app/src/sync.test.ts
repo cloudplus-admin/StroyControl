@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiClient } from './api';
-import { addDefectPhoto, closeTask, createDefect, reviewTask, seedData, toggleChecklist } from './domain';
-import { retryDelayMs, syncQueue } from './sync';
+import { addDefectPhoto, addMessage, addQualityPhoto, closeTask, createDefect, reviewQualityReport, reviewTask, seedData, submitQualityReport, toggleChecklist } from './domain';
+import { isServerSyncQueueItem, retryDelayMs, syncQueue } from './sync';
 
 describe('syncQueue', () => {
+  it('marks defect operations as server-syncable and leaves local-only modules outside the blocking queue', () => {
+    const base = { id: 'q', entityId: 'e', createdAt: new Date().toISOString(), idempotencyKey: 'q', status: 'pending' as const, attempts: 0 };
+    expect(isServerSyncQueueItem({ ...base, type: 'defect.created' })).toBe(true);
+    expect(isServerSyncQueueItem({ ...base, type: 'journal.created' })).toBe(false);
+    expect(isServerSyncQueueItem({ ...base, type: 'stock.updated' })).toBe(false);
+  });
   it('отправляет накопленные изменения чек-листа и очищает старую очередь', async () => {
     const queued = toggleChecklist(seedData, 't-101', 'c-101-1');
     const request = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
@@ -118,5 +124,39 @@ describe('syncQueue', () => {
     expect(result.queue).toHaveLength(0);
     expect(request.mock.calls[1]?.[0]).toBe('/api/defects/server-defect');
     expect(JSON.parse(String(request.mock.calls[1]?.[1]?.body))).toEqual({ status: 'verified' });
+  });
+
+  it('отправляет сообщение ленты после reconnect и заменяет временный id', async () => {
+    const queued = addMessage(seedData, 'Статус работ', undefined, undefined, '2026-08-03T10:00:00.000Z', 'ru', 'p1');
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'server-message', createdAt: '2026-08-03T10:01:00.000Z' }), { status: 201 }));
+    const api = { request, getSession: () => ({ user: { id: '00000000-0000-4000-8000-000000000001' } }) } as unknown as ApiClient;
+    const result = await syncQueue(queued, api);
+    expect(result.queue).toHaveLength(0);
+    expect(result.messages[0]?.id).toBe('server-message');
+    expect(request.mock.calls[0]?.[0]).toBe('/api/objects/p1/feed');
+  });
+
+  it('загружает полный фотоотчет только при отправке и сохраняет серверный id', async () => {
+    const report = seedData.qualityReports[0]!;
+    let queued = seedData;
+    for (const angle of report.requiredAngles) queued = addQualityPhoto(queued, report.id, angle, `file:///${angle}.jpg`);
+    expect(queued.queue.filter((item) => item.type === 'quality.updated')).toHaveLength(0);
+    queued = submitQualityReport(queued, report.id);
+    const uploadFile = vi.fn().mockImplementation(async (_path: string, uri: string) => new Response(JSON.stringify({ url: `https://cdn.test/${encodeURIComponent(uri)}` }), { status: 201 }));
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'server-report', createdAt: '2026-08-03T11:01:00.000Z' }), { status: 201 }));
+    const api = { request, uploadFile, getSession: () => ({ user: { id: '00000000-0000-4000-8000-000000000001' } }) } as unknown as ApiClient;
+    const result = await syncQueue(queued, api);
+    expect(result.queue).toHaveLength(0);
+    expect(result.qualityReports[0]?.id).toBe('server-report');
+    expect(uploadFile).toHaveBeenCalledTimes(report.requiredAngles.length);
+  });
+
+  it('отправляет решение по серверному фотоотчету', async () => {
+    const base = { ...seedData, qualityReports: seedData.qualityReports.map((report, index) => index === 0 ? { ...report, id: '00000000-0000-4000-8000-000000000010', status: 'review' as const } : report) };
+    const queued = reviewQualityReport(base, base.qualityReports[0]!.id, true);
+    const request = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    const result = await syncQueue(queued, { request } as unknown as ApiClient);
+    expect(result.queue).toHaveLength(0);
+    expect(request.mock.calls[0]?.[0]).toContain('/api/photo-reports/00000000-0000-4000-8000-000000000010/review');
   });
 });

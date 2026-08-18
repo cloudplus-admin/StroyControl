@@ -132,7 +132,7 @@ const SignaturePad = memo(function SignaturePad({ value, hint, onChange }: { val
 });
 import { ApiClient, Session } from "./src/api";
 import { loadSession, saveSession } from "./src/auth-storage";
-import { syncQueue } from "./src/sync";
+import { isServerSyncQueueItem, syncQueue } from "./src/sync";
 import { refreshServerData } from "./src/bootstrap";
 import { formatDate, formatDateTime, localeCode, uiCopy, type UiCopy } from "./src/i18n";
 import { dateInputToDeadlineIso, dateInputToIso, formatDateInput, isoToDateInput } from "./src/dateInput";
@@ -454,7 +454,7 @@ export default function App() {
     if (!ready || !online || !api || !session || syncing.current || data.queue.length === 0) return;
     // Let syncQueue inspect legacy checklist conflicts too: it can safely purge
     // them after the task has already reached review/done on the server.
-    const sendable = data.queue.filter((item) => item.type === 'task.updated' || (['task.closed', 'task.reviewed'].includes(item.type) && item.payload && item.status !== 'conflict'));
+    const sendable = data.queue.filter((item) => isServerSyncQueueItem(item) && item.status !== 'conflict');
     if (sendable.length === 0) return;
     // Checklist entries from older builds may carry a long retry timestamp even
     // though the task is already closed on the server. Reconcile server status
@@ -477,8 +477,9 @@ export default function App() {
     // processed. Otherwise the bootstrap promise can finish after syncQueue and
     // write the pre-sync queue back to storage (the legacy "17 queued" loop).
     // Once the queue is empty, this effect runs again and refreshes server data.
-    if (!ready || !online || !api || !session || data.queue.length > 0) return;
-    const key = `${session.user?.id ?? 'session'}:${data.queue.length}`;
+    const serverQueueLength = data.queue.filter(isServerSyncQueueItem).length;
+    if (!ready || !online || !api || !session || serverQueueLength > 0) return;
+    const key = `${session.user?.id ?? 'session'}:${serverQueueLength}`;
     if (lastBootstrapKey.current === key) return;
     lastBootstrapKey.current = key;
     void refreshServerData(data, api, lang)
