@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
@@ -8,6 +8,7 @@ vi.mock('./api', () => ({
   api: {
     getSession: vi.fn(),
     json: vi.fn(),
+    request: vi.fn(),
     login: vi.fn(),
     logout: vi.fn(),
   },
@@ -94,7 +95,9 @@ async function renderRole(role: string) {
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  vi.stubGlobal('crypto', { randomUUID: () => 'upload-idempotency-key' });
   mockApi();
+  vi.mocked(api.request).mockImplementation(async () => new Response(JSON.stringify({ url: 'https://api.test/api/uploads/pdf-1' }), { status: 201, headers: { 'content-type': 'application/json' } }));
 });
 
 afterEach(cleanup);
@@ -150,6 +153,29 @@ describe('role-based web workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Создать акт' })).toBe(canManage ? screen.getByRole('heading', { name: 'Создать акт' }) : null);
     expect(screen.queryByRole('button', { name: 'Согласовать' })).toBe(canDecide ? screen.getByRole('button', { name: 'Согласовать' }) : null);
     expect(screen.queryByRole('button', { name: 'Подписать акт' })).toBe(canSign ? screen.getByRole('button', { name: 'Подписать акт' }) : null);
+  });
+
+  it('uploads PDF files before creating documents and acts', async () => {
+    await renderRole('pm');
+    await userEvent.click(screen.getByRole('button', { name: 'Документы и акты' }));
+    await screen.findByRole('heading', { name: 'Документы и акты' });
+    const pdf = new File(['%PDF-1.4\n%%EOF'], 'work.pdf', { type: 'application/pdf' });
+
+    await userEvent.type(screen.getAllByLabelText('Название')[0], 'Новый проект');
+    fireEvent.change(screen.getAllByLabelText('PDF-файл')[0], { target: { files: [pdf] } });
+    fireEvent.submit(screen.getByRole('heading', { name: 'Добавить документ' }).closest('form')!);
+    await waitFor(() => expect(api.request).toHaveBeenCalledWith('/api/uploads', expect.objectContaining({ method: 'POST', body: pdf })));
+    await waitFor(() => expect(api.json).toHaveBeenCalledWith(`/api/objects/${object.id}/documents`, expect.objectContaining({
+      body: expect.stringContaining('https://api.test/api/uploads/pdf-1'),
+    })));
+
+    await userEvent.type(screen.getByLabelText('Номер'), 'А-2');
+    await userEvent.type(screen.getAllByLabelText('Название')[1], 'Акт работ');
+    fireEvent.change(screen.getAllByLabelText('PDF-файл')[1], { target: { files: [pdf] } });
+    fireEvent.submit(screen.getByRole('heading', { name: 'Создать акт' }).closest('form')!);
+    await waitFor(() => expect(api.json).toHaveBeenCalledWith(`/api/objects/${object.id}/acts`, expect.objectContaining({
+      body: expect.stringContaining('https://api.test/api/uploads/pdf-1'),
+    })));
   });
 
   it('shows the calculated completion forecast and critical path', async () => {

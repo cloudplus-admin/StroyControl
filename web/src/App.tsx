@@ -341,6 +341,22 @@ function Workspace({
   );
 }
 
+async function uploadPdf(file: File) {
+  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) throw new Error("Выберите PDF-файл");
+  if (file.size > 12 * 1024 * 1024) throw new Error("PDF-файл не должен превышать 12 МБ");
+  const response = await api.request("/api/uploads", {
+    method: "POST",
+    headers: { "content-type": "application/pdf", "idempotency-key": crypto.randomUUID(), "x-file-name": file.name },
+    body: file,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? `Загрузка PDF: HTTP ${response.status}`);
+  }
+  const result = await response.json() as { url: string };
+  return result.url;
+}
+
 function Documents({
   lang,
   canManage,
@@ -355,7 +371,7 @@ function Documents({
   const t = lang === "ru" ? {
     eyebrow: "СОГЛАСОВАНИЕ И ПРИЕМКА", title: "Документы и акты", object: "Объект",
     documents: "Документы", acts: "Акты", empty: "Пока ничего нет", addDocument: "Добавить документ",
-    addAct: "Создать акт", name: "Название", kind: "Тип", file: "Ссылка на PDF", version: "Версия",
+    addAct: "Создать акт", name: "Название", kind: "Тип", file: "PDF-файл", version: "Версия",
     number: "Номер", template: "Шаблон", amount: "Сумма", approve: "Согласовать", reject: "Отклонить",
     note: "Комментарий", sign: "Подписать акт", reload: "Обновить", createdBy: "Автор", approvals: "Решения",
     project: "Проект", estimate: "Смета", contract: "Договор", other: "Другое",
@@ -363,7 +379,7 @@ function Documents({
   } : {
     eyebrow: "KELISHISH VA QABUL", title: "Hujjatlar va dalolatnomalar", object: "Obyekt",
     documents: "Hujjatlar", acts: "Dalolatnomalar", empty: "Hozircha hech narsa yo'q", addDocument: "Hujjat qo'shish",
-    addAct: "Dalolatnoma yaratish", name: "Nomi", kind: "Turi", file: "PDF havolasi", version: "Versiya",
+    addAct: "Dalolatnoma yaratish", name: "Nomi", kind: "Turi", file: "PDF fayli", version: "Versiya",
     number: "Raqam", template: "Shablon", amount: "Summa", approve: "Tasdiqlash", reject: "Rad etish",
     note: "Izoh", sign: "Imzolash", reload: "Yangilash", createdBy: "Muallif", approvals: "Qarorlar",
     project: "Loyiha", estimate: "Smeta", contract: "Shartnoma", other: "Boshqa",
@@ -375,8 +391,11 @@ function Documents({
   const [acts, setActs] = useState<WorkAct[]>([]);
   const [error, setError] = useState("");
   const [note, setNote] = useState<Record<string, string>>({});
-  const [documentForm, setDocumentForm] = useState({ title: "", kind: "project", fileUrl: "", version: 1 });
-  const [actForm, setActForm] = useState({ number: "", title: "", template: "completed", amount: "0", pdfUrl: "" });
+  const [documentForm, setDocumentForm] = useState({ title: "", kind: "project", version: 1 });
+  const [actForm, setActForm] = useState({ number: "", title: "", template: "completed", amount: "0" });
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [actFile, setActFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   useEffect(() => {
     void api.json<ObjectSummary[]>("/api/objects").then((items) => {
       setObjects(items);
@@ -398,15 +417,27 @@ function Documents({
   useEffect(() => { void load(); }, [load]);
   const createDocument = async (event: FormEvent) => {
     event.preventDefault();
-    await api.json(`/api/objects/${objectId}/documents`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(documentForm) });
-    setDocumentForm({ ...documentForm, title: "", fileUrl: "" });
-    await load();
+    if (!documentFile) return;
+    setSubmitting(true); setError("");
+    try {
+      const fileUrl = await uploadPdf(documentFile);
+      await api.json(`/api/objects/${objectId}/documents`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...documentForm, fileUrl }) });
+      setDocumentForm({ ...documentForm, title: "" }); setDocumentFile(null);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSubmitting(false); }
   };
   const createAct = async (event: FormEvent) => {
     event.preventDefault();
-    await api.json(`/api/objects/${objectId}/acts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actForm, amount: Number(actForm.amount), pdfUrl: actForm.pdfUrl || undefined }) });
-    setActForm({ ...actForm, number: "", title: "", amount: "0", pdfUrl: "" });
-    await load();
+    if (!actFile) return;
+    setSubmitting(true); setError("");
+    try {
+      const pdfUrl = await uploadPdf(actFile);
+      await api.json(`/api/objects/${objectId}/acts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actForm, amount: Number(actForm.amount), pdfUrl }) });
+      setActForm({ ...actForm, number: "", title: "", amount: "0" }); setActFile(null);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSubmitting(false); }
   };
   const decide = async (id: string, decision: "approved" | "rejected") => {
     await api.json(`/api/documents/${id}/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision, note: note[id] || undefined }) });
@@ -423,11 +454,11 @@ function Documents({
           {document.approvals.length > 0 && <p className="decision-log">{t.approvals}: {document.approvals.map((item) => `${item.actor.fullName} - ${item.decision}${item.note ? ` (${item.note})` : ""}`).join("; ")}</p>}
           {canDecide && document.status === "review" && <div className="decision-actions"><input placeholder={t.note} value={note[document.id] || ""} onChange={(e) => setNote({ ...note, [document.id]: e.target.value })}/><button onClick={() => void decide(document.id, "approved")}>{t.approve}</button><button className="danger" disabled={!note[document.id]?.trim()} onClick={() => void decide(document.id, "rejected")}>{t.reject}</button></div>}
         </article>)}
-        {canManage && <form className="panel compact" onSubmit={createDocument}><h3>{t.addDocument}</h3><label>{t.name}<input required minLength={2} value={documentForm.title} onChange={(e) => setDocumentForm({ ...documentForm, title: e.target.value })}/></label><label>{t.kind}<select value={documentForm.kind} onChange={(e) => setDocumentForm({ ...documentForm, kind: e.target.value })}><option value="project">{t.project}</option><option value="estimate">{t.estimate}</option><option value="contract">{t.contract}</option><option value="other">{t.other}</option></select></label><label>{t.file}<input required type="url" value={documentForm.fileUrl} onChange={(e) => setDocumentForm({ ...documentForm, fileUrl: e.target.value })}/></label><label>{t.version}<input required type="number" min="1" value={documentForm.version} onChange={(e) => setDocumentForm({ ...documentForm, version: Number(e.target.value) })}/></label><button>{t.addDocument}</button></form>}
+        {canManage && <form className="panel compact" onSubmit={createDocument}><h3>{t.addDocument}</h3><label>{t.name}<input required minLength={2} value={documentForm.title} onChange={(e) => setDocumentForm({ ...documentForm, title: e.target.value })}/></label><label>{t.kind}<select value={documentForm.kind} onChange={(e) => setDocumentForm({ ...documentForm, kind: e.target.value })}><option value="project">{t.project}</option><option value="estimate">{t.estimate}</option><option value="contract">{t.contract}</option><option value="other">{t.other}</option></select></label><label>{t.file}<input required type="file" accept="application/pdf,.pdf" onChange={(e) => setDocumentFile(e.target.files?.[0] ?? null)}/></label><label>{t.version}<input required type="number" min="1" value={documentForm.version} onChange={(e) => setDocumentForm({ ...documentForm, version: Number(e.target.value) })}/></label><button disabled={submitting}>{t.addDocument}</button></form>}
       </section>
       <section className="document-column"><h2>{t.acts}</h2>{acts.length === 0 && <p className="muted">{t.empty}</p>}
         {acts.map((act) => <article className="document-card" key={act.id}><div className="document-head"><div><strong>{act.number} - {act.title}</strong><small>{act.template} · {Number(act.amount).toLocaleString(lang === "ru" ? "ru-RU" : "uz-UZ")} · {t.createdBy}: {act.createdBy.fullName}</small></div><span className={`task-status ${act.status}`}>{act.status}</span></div>{act.pdfUrl && <a href={act.pdfUrl} target="_blank" rel="noreferrer">PDF</a>}{canSign && act.status === "review" && <button onClick={() => void sign(act.id)}>{t.sign}</button>}</article>)}
-        {canManage && <form className="panel compact" onSubmit={createAct}><h3>{t.addAct}</h3><label>{t.number}<input required value={actForm.number} onChange={(e) => setActForm({ ...actForm, number: e.target.value })}/></label><label>{t.name}<input required minLength={2} value={actForm.title} onChange={(e) => setActForm({ ...actForm, title: e.target.value })}/></label><label>{t.template}<select value={actForm.template} onChange={(e) => setActForm({ ...actForm, template: e.target.value })}><option value="completed">{t.completed}</option><option value="hidden">{t.hidden}</option><option value="acceptance">{t.acceptance}</option></select></label><label>{t.amount}<input required type="number" min="0" step="0.01" value={actForm.amount} onChange={(e) => setActForm({ ...actForm, amount: e.target.value })}/></label><label>{t.file}<input type="url" value={actForm.pdfUrl} onChange={(e) => setActForm({ ...actForm, pdfUrl: e.target.value })}/></label><button>{t.addAct}</button></form>}
+        {canManage && <form className="panel compact" onSubmit={createAct}><h3>{t.addAct}</h3><label>{t.number}<input required value={actForm.number} onChange={(e) => setActForm({ ...actForm, number: e.target.value })}/></label><label>{t.name}<input required minLength={2} value={actForm.title} onChange={(e) => setActForm({ ...actForm, title: e.target.value })}/></label><label>{t.template}<select value={actForm.template} onChange={(e) => setActForm({ ...actForm, template: e.target.value })}><option value="completed">{t.completed}</option><option value="hidden">{t.hidden}</option><option value="acceptance">{t.acceptance}</option></select></label><label>{t.amount}<input required type="number" min="0" step="0.01" value={actForm.amount} onChange={(e) => setActForm({ ...actForm, amount: e.target.value })}/></label><label>{t.file}<input required type="file" accept="application/pdf,.pdf" onChange={(e) => setActFile(e.target.files?.[0] ?? null)}/></label><button disabled={submitting}>{t.addAct}</button></form>}
       </section>
     </div>
   </>;
