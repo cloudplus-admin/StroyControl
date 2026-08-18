@@ -7,7 +7,7 @@ import { asyncRoute } from '../../http/async-route';
 type Auth = { companyId: string; userId: string; roles: { code: string; objectId: string | null }[] };
 const canAccess = (auth: Auth, objectId: string) => auth.roles.some((role) => role.objectId === null || role.objectId === objectId);
 const canManage = (auth: Auth, objectId: string) => auth.roles.some((role) => ['admin', 'owner', 'pm', 'foreman'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
-const canDecide = (auth: Auth, objectId: string) => auth.roles.some((role) => ['admin', 'owner', 'pm', 'inspector', 'customer'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
+const canDecide = (auth: Auth, objectId: string) => auth.roles.some((role) => ['inspector', 'customer'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
 const canSignAct = (auth: Auth, objectId: string) => auth.roles.some((role) => ['inspector', 'customer'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
 
 export const documentsRouter = Router();
@@ -46,8 +46,23 @@ documentsRouter.post('/documents/:id/decision', asyncRoute(async (req, res) => {
   if (document.status !== 'review') return res.status(409).json({ error: 'invalid_state' });
   const updated = await prisma.$transaction(async (tx) => {
     await tx.documentApproval.upsert({ where: { documentId_actorId: { documentId: document.id, actorId: auth.userId } }, create: { documentId: document.id, actorId: auth.userId, ...input }, update: input });
-    const result = await tx.projectDocument.update({ where: { id: document.id }, data: { status: input.decision } });
-    await notifyUsers(tx, { companyId: auth.companyId, userIds: [document.createdById], objectId: document.objectId, kind: 'document_decision', title: input.decision === 'approved' ? 'Документ согласован' : 'Документ отклонен', body: input.decision === 'approved' ? document.title : `${document.title}: ${input.note}`, entityType: 'document', entityId: document.id });
+    const requiredAssignments = await tx.userRole.findMany({
+      where: { user: { companyId: auth.companyId, isActive: true }, role: { code: { in: ['customer', 'inspector'] } }, OR: [{ objectId: null }, { objectId: document.objectId }] },
+      select: { userId: true, role: { select: { code: true } } },
+    });
+    const requiredRoles = [...new Set(requiredAssignments.map((assignment) => assignment.role.code))];
+    const approvals = await tx.documentApproval.findMany({
+      where: { documentId: document.id, decision: 'approved' },
+      include: { actor: { include: { roles: { include: { role: { select: { code: true } } } } } } },
+    });
+    const coveredRoles = new Set(approvals.flatMap((approval) => approval.actor.roles
+      .filter((assignment) => assignment.objectId === null || assignment.objectId === document.objectId)
+      .map((assignment) => assignment.role.code)));
+    const status = input.decision === 'rejected'
+      ? 'rejected'
+      : requiredRoles.every((role) => coveredRoles.has(role)) && approvals.length >= requiredRoles.length ? 'approved' : 'review';
+    const result = await tx.projectDocument.update({ where: { id: document.id }, data: { status } });
+    await notifyUsers(tx, { companyId: auth.companyId, userIds: [document.createdById], objectId: document.objectId, kind: 'document_decision', title: status === 'approved' ? 'Документ согласован' : status === 'rejected' ? 'Документ отклонен' : 'Получено решение по документу', body: status === 'rejected' ? `${document.title}: ${input.note}` : document.title, entityType: 'document', entityId: document.id });
     return result;
   });
   return res.json(updated);

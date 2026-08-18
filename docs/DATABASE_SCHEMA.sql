@@ -95,11 +95,10 @@ CREATE TABLE photo_reports (
     object_id       UUID NOT NULL REFERENCES objects(id),
     author_id       UUID NOT NULL REFERENCES users(id),
     shooting_point  TEXT, -- идентификатор точки съёмки для таймлайна прогресса
-    kind            TEXT NOT NULL DEFAULT 'progress', -- progress | before | after
+    kind            TEXT NOT NULL DEFAULT 'progress', -- progress | before | after | hidden_works
     file_url        TEXT NOT NULL,
     geo_lat         DOUBLE PRECISION,
     geo_lng         DOUBLE PRECISION,
-    inspector_signature TEXT, -- подпись инженера технадзора для скрытых работ
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -124,22 +123,44 @@ CREATE TABLE feed_events (
 );
 
 -- Документооборот
-CREATE TABLE documents (
+CREATE TABLE project_documents (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id      UUID NOT NULL REFERENCES companies(id),
     object_id       UUID NOT NULL REFERENCES objects(id),
+    created_by_id   UUID NOT NULL REFERENCES users(id),
     title           TEXT NOT NULL,
-    doc_type        TEXT NOT NULL, -- чертёж | смета | договор | акт | исполнительная документация
+    kind            TEXT NOT NULL, -- project | estimate | contract | act | other
+    version         INT NOT NULL DEFAULT 1,
+    file_url        TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'draft',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE document_versions (
+CREATE TABLE document_approvals (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id     UUID NOT NULL REFERENCES documents(id),
-    version_no      INT NOT NULL,
-    file_url        TEXT NOT NULL,
-    uploaded_by     UUID NOT NULL REFERENCES users(id),
+    document_id     UUID NOT NULL REFERENCES project_documents(id) ON DELETE CASCADE,
+    actor_id        UUID NOT NULL REFERENCES users(id),
+    decision        TEXT NOT NULL, -- approved | rejected
+    note            TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (document_id, version_no)
+    UNIQUE (document_id, actor_id)
+);
+
+CREATE TABLE work_acts (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id      UUID NOT NULL REFERENCES companies(id),
+    object_id       UUID NOT NULL REFERENCES objects(id),
+    created_by_id   UUID NOT NULL REFERENCES users(id),
+    signed_by_id    UUID REFERENCES users(id),
+    template        TEXT NOT NULL, -- completed | hidden | acceptance
+    number          TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    amount          NUMERIC(14,2) NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'draft',
+    pdf_url         TEXT,
+    signed_at       TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (company_id, number)
 );
 
 -- Аудит-лог (юридическая значимость, раздел 15 ТЗ)

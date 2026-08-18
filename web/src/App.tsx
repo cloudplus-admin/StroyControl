@@ -38,6 +38,15 @@ type User = {
   isActive: boolean;
   roles: { objectId: string | null; role: { code: string; name: string } }[];
 };
+type ProjectDocument = {
+  id: string; title: string; kind: string; version: number; fileUrl: string; status: string;
+  createdBy: { fullName: string };
+  approvals: { id: string; decision: string; note?: string; actor: { fullName: string } }[];
+};
+type WorkAct = {
+  id: string; number: string; title: string; template: string; amount: string | number;
+  status: string; pdfUrl?: string; createdBy: { fullName: string }; signedBy?: { fullName: string };
+};
 
 const copy = {
   ru: {
@@ -50,6 +59,7 @@ const copy = {
     signIn: "Войти",
     objects: "Объекты и задачи",
     team: "Пользователи и роли",
+    documents: "Документы и акты",
     logout: "Выйти",
     production: "ПРОИЗВОДСТВЕННЫЙ КОНТУР",
     serverOnline: "Сервер подключен",
@@ -91,6 +101,7 @@ const copy = {
     signIn: "Kirish",
     objects: "Obyektlar va vazifalar",
     team: "Foydalanuvchilar va rollar",
+    documents: "Hujjatlar va dalolatnomalar",
     logout: "Chiqish",
     production: "ISHLAB CHIQARISH TIZIMI",
     serverOnline: "Server ulangan",
@@ -254,7 +265,16 @@ function Workspace({
   const canPlan = session.user.roles.some((role) =>
     ["admin", "owner", "pm"].includes(role.code),
   );
-  const [tab, setTab] = useState<"objects" | "team">("objects");
+  const canManageDocuments = session.user.roles.some((role) =>
+    ["admin", "owner", "pm", "foreman"].includes(role.code),
+  );
+  const canDecideDocuments = session.user.roles.some((role) =>
+    ["admin", "owner", "pm", "inspector", "customer"].includes(role.code),
+  );
+  const canSignActs = session.user.roles.some((role) =>
+    ["inspector", "customer"].includes(role.code),
+  );
+  const [tab, setTab] = useState<"objects" | "documents" | "team">("objects");
   return (
     <div className="shell">
       <aside>
@@ -268,6 +288,12 @@ function Workspace({
             onClick={() => setTab("objects")}
           >
             {c.objects}
+          </button>
+          <button
+            className={tab === "documents" ? "active" : ""}
+            onClick={() => setTab("documents")}
+          >
+            {c.documents}
           </button>
           {admin && (
             <button
@@ -287,12 +313,111 @@ function Workspace({
       <main className="workspace">
         {tab === "objects" ? (
           <Objects lang={lang} c={c} canPlan={canPlan} />
+        ) : tab === "documents" ? (
+          <Documents
+            lang={lang}
+            canManage={canManageDocuments}
+            canDecide={canDecideDocuments}
+            canSign={canSignActs}
+          />
         ) : (
           <Team lang={lang} c={c} currentUserId={session.user.id} />
         )}
       </main>
     </div>
   );
+}
+
+function Documents({
+  lang,
+  canManage,
+  canDecide,
+  canSign,
+}: {
+  lang: Lang;
+  canManage: boolean;
+  canDecide: boolean;
+  canSign: boolean;
+}) {
+  const t = lang === "ru" ? {
+    eyebrow: "СОГЛАСОВАНИЕ И ПРИЕМКА", title: "Документы и акты", object: "Объект",
+    documents: "Документы", acts: "Акты", empty: "Пока ничего нет", addDocument: "Добавить документ",
+    addAct: "Создать акт", name: "Название", kind: "Тип", file: "Ссылка на PDF", version: "Версия",
+    number: "Номер", template: "Шаблон", amount: "Сумма", approve: "Согласовать", reject: "Отклонить",
+    note: "Комментарий", sign: "Подписать акт", reload: "Обновить", createdBy: "Автор", approvals: "Решения",
+    project: "Проект", estimate: "Смета", contract: "Договор", other: "Другое",
+    completed: "Выполненные работы", hidden: "Скрытые работы", acceptance: "Приемка",
+  } : {
+    eyebrow: "KELISHISH VA QABUL", title: "Hujjatlar va dalolatnomalar", object: "Obyekt",
+    documents: "Hujjatlar", acts: "Dalolatnomalar", empty: "Hozircha hech narsa yo'q", addDocument: "Hujjat qo'shish",
+    addAct: "Dalolatnoma yaratish", name: "Nomi", kind: "Turi", file: "PDF havolasi", version: "Versiya",
+    number: "Raqam", template: "Shablon", amount: "Summa", approve: "Tasdiqlash", reject: "Rad etish",
+    note: "Izoh", sign: "Imzolash", reload: "Yangilash", createdBy: "Muallif", approvals: "Qarorlar",
+    project: "Loyiha", estimate: "Smeta", contract: "Shartnoma", other: "Boshqa",
+    completed: "Bajarilgan ishlar", hidden: "Yashirin ishlar", acceptance: "Qabul",
+  };
+  const [objects, setObjects] = useState<ObjectSummary[]>([]);
+  const [objectId, setObjectId] = useState("");
+  const [documents, setDocuments] = useState<ProjectDocument[]>([]);
+  const [acts, setActs] = useState<WorkAct[]>([]);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState<Record<string, string>>({});
+  const [documentForm, setDocumentForm] = useState({ title: "", kind: "project", fileUrl: "", version: 1 });
+  const [actForm, setActForm] = useState({ number: "", title: "", template: "completed", amount: "0", pdfUrl: "" });
+  useEffect(() => {
+    void api.json<ObjectSummary[]>("/api/objects").then((items) => {
+      setObjects(items);
+      setObjectId((current) => current || items[0]?.id || "");
+    }).catch((e) => setError(String(e)));
+  }, []);
+  const load = useCallback(async () => {
+    if (!objectId) return;
+    setError("");
+    try {
+      const [documentItems, actItems] = await Promise.all([
+        api.json<ProjectDocument[]>(`/api/objects/${objectId}/documents`),
+        api.json<WorkAct[]>(`/api/objects/${objectId}/acts`),
+      ]);
+      setDocuments(documentItems);
+      setActs(actItems);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  }, [objectId]);
+  useEffect(() => { void load(); }, [load]);
+  const createDocument = async (event: FormEvent) => {
+    event.preventDefault();
+    await api.json(`/api/objects/${objectId}/documents`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(documentForm) });
+    setDocumentForm({ ...documentForm, title: "", fileUrl: "" });
+    await load();
+  };
+  const createAct = async (event: FormEvent) => {
+    event.preventDefault();
+    await api.json(`/api/objects/${objectId}/acts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...actForm, amount: Number(actForm.amount), pdfUrl: actForm.pdfUrl || undefined }) });
+    setActForm({ ...actForm, number: "", title: "", amount: "0", pdfUrl: "" });
+    await load();
+  };
+  const decide = async (id: string, decision: "approved" | "rejected") => {
+    await api.json(`/api/documents/${id}/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision, note: note[id] || undefined }) });
+    await load();
+  };
+  const sign = async (id: string) => { await api.json(`/api/acts/${id}/sign`, { method: "POST" }); await load(); };
+  return <>
+    <header><div><p className="eyebrow">{t.eyebrow}</p><h1>{t.title}</h1></div><button onClick={() => void load()}>{t.reload}</button></header>
+    {error && <p className="error">{error}</p>}
+    <label className="object-picker">{t.object}<select value={objectId} onChange={(e) => setObjectId(e.target.value)}>{objects.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}</select></label>
+    <div className="document-layout">
+      <section className="document-column"><h2>{t.documents}</h2>{documents.length === 0 && <p className="muted">{t.empty}</p>}
+        {documents.map((document) => <article className="document-card" key={document.id}><div className="document-head"><div><strong>{document.title}</strong><small>{document.kind} · v{document.version} · {t.createdBy}: {document.createdBy.fullName}</small></div><span className={`task-status ${document.status}`}>{document.status}</span></div><a href={document.fileUrl} target="_blank" rel="noreferrer">PDF</a>
+          {document.approvals.length > 0 && <p className="decision-log">{t.approvals}: {document.approvals.map((item) => `${item.actor.fullName} - ${item.decision}${item.note ? ` (${item.note})` : ""}`).join("; ")}</p>}
+          {canDecide && document.status === "review" && <div className="decision-actions"><input placeholder={t.note} value={note[document.id] || ""} onChange={(e) => setNote({ ...note, [document.id]: e.target.value })}/><button onClick={() => void decide(document.id, "approved")}>{t.approve}</button><button className="danger" disabled={!note[document.id]?.trim()} onClick={() => void decide(document.id, "rejected")}>{t.reject}</button></div>}
+        </article>)}
+        {canManage && <form className="panel compact" onSubmit={createDocument}><h3>{t.addDocument}</h3><label>{t.name}<input required minLength={2} value={documentForm.title} onChange={(e) => setDocumentForm({ ...documentForm, title: e.target.value })}/></label><label>{t.kind}<select value={documentForm.kind} onChange={(e) => setDocumentForm({ ...documentForm, kind: e.target.value })}><option value="project">{t.project}</option><option value="estimate">{t.estimate}</option><option value="contract">{t.contract}</option><option value="other">{t.other}</option></select></label><label>{t.file}<input required type="url" value={documentForm.fileUrl} onChange={(e) => setDocumentForm({ ...documentForm, fileUrl: e.target.value })}/></label><label>{t.version}<input required type="number" min="1" value={documentForm.version} onChange={(e) => setDocumentForm({ ...documentForm, version: Number(e.target.value) })}/></label><button>{t.addDocument}</button></form>}
+      </section>
+      <section className="document-column"><h2>{t.acts}</h2>{acts.length === 0 && <p className="muted">{t.empty}</p>}
+        {acts.map((act) => <article className="document-card" key={act.id}><div className="document-head"><div><strong>{act.number} - {act.title}</strong><small>{act.template} · {Number(act.amount).toLocaleString(lang === "ru" ? "ru-RU" : "uz-UZ")} · {t.createdBy}: {act.createdBy.fullName}</small></div><span className={`task-status ${act.status}`}>{act.status}</span></div>{act.pdfUrl && <a href={act.pdfUrl} target="_blank" rel="noreferrer">PDF</a>}{canSign && act.status === "review" && <button onClick={() => void sign(act.id)}>{t.sign}</button>}</article>)}
+        {canManage && <form className="panel compact" onSubmit={createAct}><h3>{t.addAct}</h3><label>{t.number}<input required value={actForm.number} onChange={(e) => setActForm({ ...actForm, number: e.target.value })}/></label><label>{t.name}<input required minLength={2} value={actForm.title} onChange={(e) => setActForm({ ...actForm, title: e.target.value })}/></label><label>{t.template}<select value={actForm.template} onChange={(e) => setActForm({ ...actForm, template: e.target.value })}><option value="completed">{t.completed}</option><option value="hidden">{t.hidden}</option><option value="acceptance">{t.acceptance}</option></select></label><label>{t.amount}<input required type="number" min="0" step="0.01" value={actForm.amount} onChange={(e) => setActForm({ ...actForm, amount: e.target.value })}/></label><label>{t.file}<input type="url" value={actForm.pdfUrl} onChange={(e) => setActForm({ ...actForm, pdfUrl: e.target.value })}/></label><button>{t.addAct}</button></form>}
+      </section>
+    </div>
+  </>;
 }
 
 function Objects({

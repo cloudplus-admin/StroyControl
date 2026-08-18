@@ -7,13 +7,14 @@ import { hashPassword } from '../src/auth/crypto';
 const app = createApp();
 async function fixture() {
   const company = await prisma.company.create({ data: { name: `Docs ${Date.now()}` } });
-  for (const [code, name] of [['admin', 'Администратор'], ['customer', 'Заказчик']] as const) await prisma.role.upsert({ where: { code }, create: { code, name }, update: {} });
+  for (const [code, name] of [['admin', 'Администратор'], ['customer', 'Заказчик'], ['inspector', 'Технадзор']] as const) await prisma.role.upsert({ where: { code }, create: { code, name }, update: {} });
   const object = await prisma.object.create({ data: { companyId: company.id, name: 'Пилот' } });
-  const makeUser = async (email: string, roleCode: string) => prisma.user.create({ data: { companyId: company.id, email, fullName: roleCode, passwordHash: await hashPassword('StrongPassword123!'), roles: { create: { roleId: (await prisma.role.findUniqueOrThrow({ where: { code: roleCode } })).id, objectId: roleCode === 'customer' ? object.id : null } } } });
+  const makeUser = async (email: string, roleCode: string) => prisma.user.create({ data: { companyId: company.id, email, fullName: roleCode, passwordHash: await hashPassword('StrongPassword123!'), roles: { create: { roleId: (await prisma.role.findUniqueOrThrow({ where: { code: roleCode } })).id, objectId: roleCode === 'admin' ? null : object.id } } } });
   const admin = await makeUser(`admin-${Date.now()}@example.com`, 'admin');
   const customer = await makeUser(`customer-${Date.now()}@example.com`, 'customer');
+  const inspector = await makeUser(`inspector-${Date.now()}@example.com`, 'inspector');
   const login = async (email: string) => (await request(app).post('/api/auth/login').send({ email, password: 'StrongPassword123!' })).body.accessToken as string;
-  return { object, adminToken: await login(admin.email), customerToken: await login(customer.email) };
+  return { object, adminToken: await login(admin.email), customerToken: await login(customer.email), inspectorToken: await login(inspector.email) };
 }
 
 describe('documents and customer portal', () => {
@@ -25,15 +26,17 @@ describe('documents and customer portal', () => {
     expect(customerNotifications.body).toMatchObject({ unread: 1 });
     expect(customerNotifications.body.items[0]).toMatchObject({ kind: 'document_review', entityId: created.body.id });
     const decision = await request(app).post(`/api/documents/${created.body.id}/decision`).set('authorization', `Bearer ${f.customerToken}`).send({ decision: 'approved', note: 'Согласовано' });
-    expect(decision.status).toBe(200); expect(decision.body.status).toBe('approved');
+    expect(decision.status).toBe(200); expect(decision.body.status).toBe('review');
+    const inspectorDecision = await request(app).post(`/api/documents/${created.body.id}/decision`).set('authorization', `Bearer ${f.inspectorToken}`).send({ decision: 'approved', note: 'Соответствует проекту' });
+    expect(inspectorDecision.status).toBe(200); expect(inspectorDecision.body.status).toBe('approved');
     const repeated = await request(app).post(`/api/documents/${created.body.id}/decision`).set('authorization', `Bearer ${f.customerToken}`).send({ decision: 'rejected', note: 'Позднее решение' });
     expect(repeated.status).toBe(409); expect(repeated.body.error).toBe('invalid_state');
     const adminNotifications = await request(app).get('/api/notifications').set('authorization', `Bearer ${f.adminToken}`);
     expect(adminNotifications.body.items[0]).toMatchObject({ kind: 'document_decision', entityId: created.body.id });
     const read = await request(app).post('/api/notifications/read-all').set('authorization', `Bearer ${f.adminToken}`);
-    expect(read.body.updated).toBe(1);
+    expect(read.body.updated).toBe(2);
     const listed = await request(app).get(`/api/objects/${f.object.id}/documents`).set('authorization', `Bearer ${f.customerToken}`);
-    expect(listed.body[0].approvals[0].decision).toBe('approved');
+    expect(listed.body[0].approvals).toHaveLength(2);
   });
 
   it('returns a stable 400 for malformed document input', async () => {
