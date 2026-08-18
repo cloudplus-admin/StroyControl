@@ -4,6 +4,22 @@ import { AppData, QueueItem } from './domain';
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 export const retryDelayMs = (attempts: number) => Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.max(0, attempts - 1));
 
+class SyncHttpError extends Error {
+  constructor(readonly status: number) { super(`HTTP ${status}`); }
+}
+
+function ensureSyncResponse(response: Response): void {
+  if (!response.ok) throw new SyncHttpError(response.status);
+}
+
+function queueAfterError(item: QueueItem, error: unknown, now: number): QueueItem {
+  if (error instanceof SyncHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 425 && error.status !== 429) {
+    return { ...item, status: 'conflict', lastError: `sync_http_${error.status}`, nextAttemptAt: undefined };
+  }
+  const attempts = item.attempts + 1;
+  return { ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() };
+}
+
 const SERVER_SYNC_TYPES = new Set<QueueItem['type']>([
   'task.updated', 'task.closed', 'task.reviewed', 'defect.created', 'defect.updated',
   'quality.updated', 'quality.reviewed', 'message.created',
@@ -42,16 +58,13 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
           headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey },
           body: JSON.stringify({ reportedBy: userId, description: defect.title }),
         });
-        if (response.status === 409) { queue.push({ ...item, status: 'conflict', lastError: 'sync_idempotency_conflict' }); continue; }
-        if (response.status === 401) { queue.push({ ...item, status: 'failed', lastError: 'sync_session_expired' }); continue; }
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        ensureSyncResponse(response);
         const created = await response.json() as { id: string; status: string; createdAt: string };
         defects = defects.map((candidate) => candidate.id === item.entityId ? { ...candidate, id: created.id, createdAt: created.createdAt } : candidate);
         defectIds.set(item.entityId, created.id);
         continue;
       } catch (error) {
-        const attempts = item.attempts + 1;
-        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        queue.push(queueAfterError(item, error, now));
         continue;
       }
     }
@@ -63,13 +76,10 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
         const response = await api.request(`/api/defects/${encodeURIComponent(defect.id)}`, {
           method: 'PATCH', headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey }, body: JSON.stringify({ status }),
         });
-        if (response.status === 409) { queue.push({ ...item, status: 'conflict', lastError: 'sync_idempotency_conflict' }); continue; }
-        if (response.status === 401) { queue.push({ ...item, status: 'failed', lastError: 'sync_session_expired' }); continue; }
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        ensureSyncResponse(response);
         continue;
       } catch (error) {
-        const attempts = item.attempts + 1;
-        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        queue.push(queueAfterError(item, error, now));
         continue;
       }
     }
@@ -83,13 +93,12 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
           headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey },
           body: JSON.stringify({ authorId: userId, body: message.text, mentionedUserIds: [], ...(message.parentId && /^[0-9a-f-]{36}$/i.test(message.parentId) ? { parentEventId: message.parentId } : {}) }),
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        ensureSyncResponse(response);
         const created = await response.json() as { id: string; createdAt: string };
         messages = messages.map((candidate) => candidate.id === item.entityId ? { ...candidate, id: created.id, createdAt: created.createdAt } : candidate);
         continue;
       } catch (error) {
-        const attempts = item.attempts + 1;
-        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        queue.push(queueAfterError(item, error, now));
         continue;
       }
     }
@@ -108,7 +117,7 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
               'content-type': 'image/jpeg', 'idempotency-key': `${item.idempotencyKey}:photo:${index}`,
               'x-file-name': `quality-${item.entityId}-${index + 1}.jpg`,
             });
-            if (!upload.ok) throw new Error(`Upload HTTP ${upload.status}`);
+            ensureSyncResponse(upload);
             uri = (await upload.json() as { url: string }).url;
           }
           photos.push({ angle: photo.angle, uri });
@@ -117,14 +126,13 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
           method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey },
           body: JSON.stringify({ taskId: /^[0-9a-f-]{36}$/i.test(report.taskId) ? report.taskId : undefined, authorId: userId, shootingPoint: report.point, kind: report.kind === 'hidden' ? 'hidden_works' : 'progress', fileUrl: photos[0]?.uri, requiredAngles: report.requiredAngles, photos, status: 'review' }),
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        ensureSyncResponse(response);
         const created = await response.json() as { id: string; createdAt: string };
         qualityReports = qualityReports.map((candidate) => candidate.id === item.entityId ? { ...candidate, id: created.id, createdAt: created.createdAt, photos } : candidate);
         qualityIds.set(item.entityId, created.id);
         continue;
       } catch (error) {
-        const attempts = item.attempts + 1;
-        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        queue.push(queueAfterError(item, error, now));
         continue;
       }
     }
@@ -136,11 +144,10 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
           method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey },
           body: JSON.stringify({ decision: report.status === 'accepted' ? 'accepted' : 'rejected', note: report.inspectorNote ?? '' }),
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        ensureSyncResponse(response);
         continue;
       } catch (error) {
-        const attempts = item.attempts + 1;
-        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        queue.push(queueAfterError(item, error, now));
         continue;
       }
     }
@@ -162,14 +169,11 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
             headers: { 'content-type': 'application/json', 'idempotency-key': `${item.idempotencyKey}:${checklistItem.id}` },
             body: JSON.stringify({ isDone: checklistItem.done }),
           });
-          if (response.status === 409) throw new Error('sync_idempotency_conflict');
-          if (response.status === 401) throw new Error('sync_session_expired');
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          ensureSyncResponse(response);
         }
         continue;
       } catch (error) {
-        const attempts = item.attempts + 1;
-        queue.push({ ...item, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+        queue.push(queueAfterError(item, error, now));
         continue;
       }
     }
@@ -189,7 +193,7 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
             'x-task-id': item.entityId,
             'x-file-name': `task-${item.entityId}-${index + 1}.${mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg'}`,
           });
-          if (!upload.ok) throw new Error(`Upload HTTP ${upload.status}`);
+          ensureSyncResponse(upload);
           photoUrls[index] = (await upload.json() as { url: string }).url;
           current = { ...current, payload: { ...item.payload, photoUrls: [...photoUrls] } };
         }
@@ -200,13 +204,10 @@ export async function syncQueue(data: AppData, api: ApiClient, now = Date.now())
         headers: { 'content-type': 'application/json', 'idempotency-key': item.idempotencyKey },
         body: JSON.stringify(current.payload),
       });
-      if (response.ok) continue;
-      if (response.status === 409) { queue.push({ ...current, status: 'conflict', lastError: 'sync_idempotency_conflict' }); continue; }
-      if (response.status === 401) { queue.push({ ...current, status: 'failed', lastError: 'sync_session_expired' }); continue; }
-      throw new Error(`HTTP ${response.status}`);
+      ensureSyncResponse(response);
+      continue;
     } catch (error) {
-      const attempts = item.attempts + 1;
-      queue.push({ ...current, status: 'failed', attempts, lastError: error instanceof Error ? error.message : 'sync_network_error', nextAttemptAt: new Date(now + retryDelayMs(attempts)).toISOString() });
+      queue.push(queueAfterError(current, error, now));
     }
   }
   return { ...data, defects, qualityReports, messages, queue };

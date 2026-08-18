@@ -76,6 +76,24 @@ describe('syncQueue', () => {
     expect(result.queue[0]?.status).toBe('conflict');
   });
 
+  it('не отправляет постоянную ошибку 4xx в бесконечный retry', async () => {
+    const queued = closeTask(seedData, 't-101', 'https://cdn.test/photo.jpg', 41.3, 69.2);
+    const request = vi.fn().mockResolvedValue(new Response('{"error":"invalid"}', { status: 422 }));
+    const first = await syncQueue(queued, { request } as unknown as ApiClient);
+    expect(first.queue[0]).toMatchObject({ status: 'conflict', attempts: 0, lastError: 'sync_http_422' });
+    await syncQueue(first, { request } as unknown as ApiClient, Date.now() + 60_000);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('повторяет временные HTTP ошибки с backoff', async () => {
+    const queued = closeTask(seedData, 't-101', 'https://cdn.test/photo.jpg', 41.3, 69.2);
+    const now = Date.parse('2026-08-03T06:01:00.000Z');
+    const request = vi.fn().mockResolvedValue(new Response('{}', { status: 429 }));
+    const result = await syncQueue(queued, { request } as unknown as ApiClient, now);
+    expect(result.queue[0]).toMatchObject({ status: 'failed', attempts: 1, lastError: 'HTTP 429' });
+    expect(result.queue[0]?.nextAttemptAt).toBe(new Date(now + retryDelayMs(1)).toISOString());
+  });
+
   it('загружает несколько локальных фото перед закрытием и сохраняет загруженные URL после ошибки close', async () => {
     const queued = closeTask(seedData, 't-101', ['file:///photo-1.jpg', 'file:///photo-2.jpg'], 41.3, 69.2);
     const request = vi.fn()
