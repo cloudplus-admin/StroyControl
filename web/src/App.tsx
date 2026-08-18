@@ -54,6 +54,7 @@ const copy = {
     eyebrowLogin: "УПРАВЛЕНИЕ СТРОИТЕЛЬСТВОМ",
     loginTitle: "Вход в рабочий контур",
     loginBody: "Объекты, команда и задачи одной компании.",
+    login: "Email или логин",
     password: "Пароль",
     signingIn: "Входим...",
     signIn: "Войти",
@@ -96,6 +97,7 @@ const copy = {
     eyebrowLogin: "QURILISHNI BOSHQARISH",
     loginTitle: "Ish tizimiga kirish",
     loginBody: "Bir kompaniyaning obyektlari, jamoasi va vazifalari.",
+    login: "Email yoki login",
     password: "Parol",
     signingIn: "Kirilmoqda...",
     signIn: "Kirish",
@@ -223,9 +225,10 @@ function Login({
         <p className="muted">{c.loginBody}</p>
         <form onSubmit={submit}>
           <label>
-            Email
+            {c.login}
             <input
-              type="email"
+              type="text"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -237,7 +240,7 @@ function Login({
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              minLength={8}
+              minLength={3}
               required
             />
           </label>
