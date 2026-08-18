@@ -139,9 +139,9 @@ describe('role-based web workspace', () => {
   });
 
   it.each([
-    ['admin', true, true, false],
-    ['pm', true, true, false],
-    ['foreman', true, false, false],
+    ['admin', true, false, false],
+    ['pm', true, false, false],
+    ['foreman', false, false, false],
     ['inspector', false, true, true],
     ['customer', false, true, true],
   ])('enforces document and act actions for %s', async (role, canManage, canDecide, canSign) => {
@@ -153,6 +153,19 @@ describe('role-based web workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Создать акт' })).toBe(canManage ? screen.getByRole('heading', { name: 'Создать акт' }) : null);
     expect(screen.queryByRole('button', { name: 'Согласовать' })).toBe(canDecide ? screen.getByRole('button', { name: 'Согласовать' }) : null);
     expect(screen.queryByRole('button', { name: 'Подписать акт' })).toBe(canSign ? screen.getByRole('button', { name: 'Подписать акт' }) : null);
+  });
+
+  it('scopes document actions to the selected object', async () => {
+    const scopedSession = session('foreman');
+    scopedSession.user.roles.push({ code: 'inspector', objectId: 'object-2' });
+    vi.mocked(api.getSession).mockReturnValue(scopedSession);
+    render(<App />);
+    await screen.findByText('ЖК Тестовый');
+    await userEvent.click(screen.getByRole('button', { name: 'Документы и акты' }));
+    await screen.findByRole('heading', { name: 'Документы и акты' });
+
+    expect(screen.queryByRole('button', { name: 'Согласовать' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Подписать акт' })).not.toBeInTheDocument();
   });
 
   it('uploads PDF files before creating documents and acts', async () => {

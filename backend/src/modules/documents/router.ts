@@ -6,7 +6,7 @@ import { asyncRoute } from '../../http/async-route';
 
 type Auth = { companyId: string; userId: string; roles: { code: string; objectId: string | null }[] };
 const canAccess = (auth: Auth, objectId: string) => auth.roles.some((role) => role.objectId === null || role.objectId === objectId);
-const canManage = (auth: Auth, objectId: string) => auth.roles.some((role) => ['admin', 'owner', 'pm', 'foreman'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
+const canManage = (auth: Auth, objectId: string) => auth.roles.some((role) => ['admin', 'owner', 'pm'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
 const canDecide = (auth: Auth, objectId: string) => auth.roles.some((role) => ['inspector', 'customer'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
 const canSignAct = (auth: Auth, objectId: string) => auth.roles.some((role) => ['inspector', 'customer'].includes(role.code) && (role.objectId === null || role.objectId === objectId));
 

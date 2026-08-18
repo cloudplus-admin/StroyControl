@@ -269,15 +269,6 @@ function Workspace({
   const canPlan = session.user.roles.some((role) =>
     ["admin", "owner", "pm"].includes(role.code),
   );
-  const canManageDocuments = session.user.roles.some((role) =>
-    ["admin", "owner", "pm", "foreman"].includes(role.code),
-  );
-  const canDecideDocuments = session.user.roles.some((role) =>
-    ["admin", "owner", "pm", "inspector", "customer"].includes(role.code),
-  );
-  const canSignActs = session.user.roles.some((role) =>
-    ["inspector", "customer"].includes(role.code),
-  );
   const [tab, setTab] = useState<"objects" | "schedule" | "acceptance" | "photo" | "documents" | "team">("objects");
   return (
     <div className="shell">
@@ -329,9 +320,7 @@ function Workspace({
         ) : tab === "documents" ? (
           <Documents
             lang={lang}
-            canManage={canManageDocuments}
-            canDecide={canDecideDocuments}
-            canSign={canSignActs}
+            roles={session.user.roles}
           />
         ) : (
           <Team lang={lang} c={c} currentUserId={session.user.id} />
@@ -359,14 +348,10 @@ async function uploadPdf(file: File) {
 
 function Documents({
   lang,
-  canManage,
-  canDecide,
-  canSign,
+  roles,
 }: {
   lang: Lang;
-  canManage: boolean;
-  canDecide: boolean;
-  canSign: boolean;
+  roles: UserSession["user"]["roles"];
 }) {
   const t = lang === "ru" ? {
     eyebrow: "СОГЛАСОВАНИЕ И ПРИЕМКА", title: "Документы и акты", object: "Объект",
@@ -396,6 +381,12 @@ function Documents({
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [actFile, setActFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const hasObjectRole = (allowedRoles: string[]) => roles.some((role) =>
+    allowedRoles.includes(role.code) && (role.objectId === null || role.objectId === objectId),
+  );
+  const canManage = hasObjectRole(["admin", "owner", "pm"]);
+  const canDecide = hasObjectRole(["inspector", "customer"]);
+  const canSign = hasObjectRole(["inspector", "customer"]);
   useEffect(() => {
     void api.json<ObjectSummary[]>("/api/objects").then((items) => {
       setObjects(items);

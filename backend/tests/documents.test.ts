@@ -7,14 +7,16 @@ import { hashPassword } from '../src/auth/crypto';
 const app = createApp();
 async function fixture() {
   const company = await prisma.company.create({ data: { name: `Docs ${Date.now()}` } });
-  for (const [code, name] of [['admin', 'Администратор'], ['customer', 'Заказчик'], ['inspector', 'Технадзор']] as const) await prisma.role.upsert({ where: { code }, create: { code, name }, update: {} });
+  for (const [code, name] of [['admin', 'Администратор'], ['pm', 'Руководитель проекта'], ['foreman', 'Прораб'], ['customer', 'Заказчик'], ['inspector', 'Технадзор']] as const) await prisma.role.upsert({ where: { code }, create: { code, name }, update: {} });
   const object = await prisma.object.create({ data: { companyId: company.id, name: 'Пилот' } });
   const makeUser = async (email: string, roleCode: string) => prisma.user.create({ data: { companyId: company.id, email, fullName: roleCode, passwordHash: await hashPassword('StrongPassword123!'), roles: { create: { roleId: (await prisma.role.findUniqueOrThrow({ where: { code: roleCode } })).id, objectId: roleCode === 'admin' ? null : object.id } } } });
   const admin = await makeUser(`admin-${Date.now()}@example.com`, 'admin');
+  const pm = await makeUser(`pm-${Date.now()}@example.com`, 'pm');
+  const foreman = await makeUser(`foreman-${Date.now()}@example.com`, 'foreman');
   const customer = await makeUser(`customer-${Date.now()}@example.com`, 'customer');
   const inspector = await makeUser(`inspector-${Date.now()}@example.com`, 'inspector');
   const login = async (email: string) => (await request(app).post('/api/auth/login').send({ email, password: 'StrongPassword123!' })).body.accessToken as string;
-  return { object, adminToken: await login(admin.email), customerToken: await login(customer.email), inspectorToken: await login(inspector.email) };
+  return { object, adminToken: await login(admin.email), pmToken: await login(pm.email), foremanToken: await login(foreman.email), customerToken: await login(customer.email), inspectorToken: await login(inspector.email) };
 }
 
 describe('documents and customer portal', () => {
@@ -43,6 +45,16 @@ describe('documents and customer portal', () => {
     const f = await fixture();
     const response = await request(app).post(`/api/objects/${f.object.id}/documents`).set('authorization', `Bearer ${f.adminToken}`).send({ title: '', kind: 'invalid', fileUrl: 'not-a-url' });
     expect(response.status).toBe(400); expect(response.body).toMatchObject({ error: 'validation_error' });
+  });
+
+  it('allows PM creation but keeps foreman and management out of approval actions', async () => {
+    const f = await fixture();
+    const foremanCreate = await request(app).post(`/api/objects/${f.object.id}/documents`).set('authorization', `Bearer ${f.foremanToken}`).send({ title: 'Исполнительная схема', kind: 'project', fileUrl: 'https://files.example/scheme.pdf' });
+    expect(foremanCreate.status).toBe(403);
+    const created = await request(app).post(`/api/objects/${f.object.id}/documents`).set('authorization', `Bearer ${f.pmToken}`).send({ title: 'Исполнительная схема', kind: 'project', fileUrl: 'https://files.example/scheme.pdf' });
+    expect(created.status).toBe(201);
+    const managementDecision = await request(app).post(`/api/documents/${created.body.id}/decision`).set('authorization', `Bearer ${f.adminToken}`).send({ decision: 'approved' });
+    expect(managementDecision.status).toBe(403);
   });
 
   it('creates and signs an act while preventing customer creation', async () => {
