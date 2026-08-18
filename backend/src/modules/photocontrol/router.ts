@@ -1,8 +1,9 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { createPhotoReportSchema, createDefectSchema, reviewPhotoReportSchema, updateDefectSchema } from './schemas';
 import * as photocontrolService from './service';
 import { prisma } from '../../db/prisma';
+import { requireCompanyId } from '../../auth/context';
 
 export const photocontrolRouter = Router();
 type Auth = { userId: string; roles: { code: string; objectId: string | null }[] };
@@ -10,15 +11,6 @@ const canAccess = (res: Response, objectId: string, allowed?: string[]) => {
   const auth = res.locals.auth as Auth | undefined;
   return process.env.NODE_ENV === 'test' && !auth ? true : Boolean(auth?.roles.some((role) => (!allowed || allowed.includes(role.code)) && (role.objectId === null || role.objectId === objectId)));
 };
-
-function requireCompanyId(req: Request, res: Response): string | null {
-  const companyId = req.header('x-company-id');
-  if (!companyId) {
-    res.status(401).json({ error: 'x-company-id header is required (temporary stand-in until auth is implemented)' });
-    return null;
-  }
-  return companyId;
-}
 
 function handleZodError(err: unknown, res: Response, next: NextFunction): boolean {
   if (err instanceof ZodError) {

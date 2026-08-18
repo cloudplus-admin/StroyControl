@@ -11,6 +11,5 @@ export async function requireAccessToken(req: Request, res: Response, next: Next
   const auth = await authenticateAccessToken(token);
   if (!auth) return res.status(401).json({ error: 'Access token is invalid or expired' });
   res.locals.auth = auth;
-  req.headers['x-company-id'] = auth.companyId;
   return next();
 }

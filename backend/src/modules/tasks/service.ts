@@ -1,6 +1,6 @@
 import { prisma } from '../../db/prisma';
 import { createHash } from 'crypto';
-import { notifyObjectRoles, notifyUsers } from '../notifications/service';
+import { notifyUsers } from '../notifications/service';
 
 function scopedTaskWhere(companyId: string, taskId: string) {
   return { id: taskId, workSection: { stage: { object: { companyId } } } };

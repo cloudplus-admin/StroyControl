@@ -1,8 +1,9 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { createFeedEventSchema, reactionSchema, searchQuerySchema } from './schemas';
 import * as feedService from './service';
 import { prisma } from '../../db/prisma';
+import { requireCompanyId } from '../../auth/context';
 
 export const feedRouter = Router();
 type Auth = { userId: string; roles: { objectId: string | null }[] };
@@ -10,15 +11,6 @@ const canAccess = (res: Response, objectId: string) => {
   const auth = res.locals.auth as Auth | undefined;
   return process.env.NODE_ENV === 'test' && !auth ? true : Boolean(auth?.roles.some((role) => role.objectId === null || role.objectId === objectId));
 };
-
-function requireCompanyId(req: Request, res: Response): string | null {
-  const companyId = req.header('x-company-id');
-  if (!companyId) {
-    res.status(401).json({ error: 'x-company-id header is required (temporary stand-in until auth is implemented)' });
-    return null;
-  }
-  return companyId;
-}
 
 function handleZodError(err: unknown, res: Response, next: NextFunction): boolean {
   if (err instanceof ZodError) {

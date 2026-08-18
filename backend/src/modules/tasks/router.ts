@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import {
   updateTaskSchema,
@@ -9,6 +9,7 @@ import {
   assignReviewerSchema,
 } from './schemas';
 import * as tasksService from './service';
+import { requireCompanyId } from '../../auth/context';
 
 export const tasksRouter = Router();
 
@@ -18,15 +19,6 @@ async function authorizeTask(res: Response, taskId: string, allowed?: string[]) 
   const auth = res.locals.auth as Auth | undefined;
   const objectId = await tasksService.getTaskObjectId(taskId);
   return objectId && hasScope(auth, objectId, allowed);
-}
-
-function requireCompanyId(req: Request, res: Response): string | null {
-  const companyId = req.header('x-company-id');
-  if (!companyId) {
-    res.status(401).json({ error: 'x-company-id header is required (temporary stand-in until auth is implemented)' });
-    return null;
-  }
-  return companyId;
 }
 
 function handleZodError(err: unknown, res: Response, next: NextFunction): boolean {
