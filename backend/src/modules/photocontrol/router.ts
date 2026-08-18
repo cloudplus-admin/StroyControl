@@ -108,6 +108,22 @@ photocontrolRouter.get('/objects/:objectId/defects', async (req, res, next) => {
   }
 });
 
+photocontrolRouter.get('/objects/:objectId/defect-assignees', async (req, res, next) => {
+  try {
+    const companyId = requireCompanyId(req, res);
+    if (!companyId) return;
+    if (!canAccess(res, req.params.objectId)) return res.status(404).json({ error: 'not_found' });
+    const users = await prisma.user.findMany({
+      where: { companyId, isActive: true, roles: { some: { OR: [{ objectId: null }, { objectId: req.params.objectId }] } } },
+      select: { id: true, fullName: true },
+      orderBy: { fullName: 'asc' },
+    });
+    res.json(users);
+  } catch (err) {
+    next(err);
+  }
+});
+
 photocontrolRouter.post('/objects/:objectId/defects', async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
@@ -126,12 +142,19 @@ photocontrolRouter.patch('/defects/:id', async (req, res, next) => {
   try {
     const companyId = requireCompanyId(req, res);
     if (!companyId) return;
-    const defectRecord = await prisma.defect.findFirst({ where: { id: req.params.id, object: { companyId } }, select: { objectId: true } });
-    if (!defectRecord || !canAccess(res, defectRecord.objectId, ['admin', 'owner', 'pm', 'foreman', 'inspector'])) return res.status(403).json({ error: 'forbidden' });
+    const defectRecord = await prisma.defect.findFirst({ where: { id: req.params.id, object: { companyId } }, select: { objectId: true, assignedToId: true, status: true } });
+    if (!defectRecord || !canAccess(res, defectRecord.objectId, ['admin', 'owner', 'pm', 'foreman', 'subcontractor', 'inspector', 'customer'])) return res.status(403).json({ error: 'forbidden' });
     const input = updateDefectSchema.parse(req.body);
-    const defect = await photocontrolService.updateDefectStatus(companyId, req.params.id, input.status, input.afterPhotos);
+    const auth = res.locals.auth as Auth | undefined;
+    const isManager = canAccess(res, defectRecord.objectId, ['admin', 'owner', 'pm']);
+    const isReviewer = canAccess(res, defectRecord.objectId, ['admin', 'owner', 'pm', 'inspector', 'customer']);
+    const isDecision = input.status === 'closed' || (defectRecord.status === 'review' && input.status === 'in_progress');
+    if (isDecision && !isReviewer) return res.status(403).json({ error: 'forbidden' });
+    if (!isDecision && auth && !isManager && defectRecord.assignedToId !== auth.userId) return res.status(403).json({ error: 'forbidden' });
+    const defect = await photocontrolService.updateDefectStatus(companyId, req.params.id, input.status, input.afterPhotos, input.note);
     if (defect === 'invalid_transition') return res.status(409).json({ error: 'invalid_transition' });
     if (defect === 'after_photos_required') return res.status(422).json({ error: 'after_photos_required' });
+    if (defect === 'rejection_note_required') return res.status(422).json({ error: 'rejection_note_required' });
     if (!defect) return res.status(404).json({ error: 'not_found' });
     res.json(defect);
   } catch (err) {

@@ -77,6 +77,7 @@ function mockApi() {
     if (path === '/api/tasks/task-1') return { ...gantt.stages[0].sections[0].tasks[0], closurePhotos: ['https://example.com/photo.jpg'] };
     if (path.endsWith('/photo-reports')) return [];
     if (path.endsWith('/defects')) return [];
+    if (path.endsWith('/defect-assignees')) return [{ id: 'user-foreman', fullName: 'Прораб' }];
     if (path === '/api/planning/users') return [];
     if (path === '/api/admin/users') return [];
     if (path === '/api/admin/roles') return [];

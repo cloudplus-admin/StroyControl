@@ -44,7 +44,10 @@ type Defect = {
   beforePhotos: string[];
   afterPhotos: string[];
   dueAt?: string;
+  reviewNote?: string;
+  assignedTo?: { id: string; fullName: string };
 };
+type Assignee = { id: string; fullName: string };
 
 type Coordinates = { latitude: number; longitude: number; accuracy: number };
 
@@ -379,56 +382,75 @@ export function PhotoControl({ session }: { session: UserSession }) {
   const [reports, setReports] = useState<PhotoReport[]>([]);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [error, setError] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [reportFiles, setReportFiles] = useState<File[]>([]);
+  const [defectFile, setDefectFile] = useState<File | null>(null);
+  const [afterFile, setAfterFile] = useState<Record<string, File | null>>({});
   const [description, setDescription] = useState("");
   const [reportKind, setReportKind] = useState("progress");
-  const canWrite = session.user.roles.some((role) =>
+  const [shootingPoint, setShootingPoint] = useState("");
+  const [angles, setAngles] = useState("Общий");
+  const [dueAt, setDueAt] = useState("");
+  const [assignees, setAssignees] = useState<Assignee[]>([]);
+  const [assignedToId, setAssignedToId] = useState("");
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const rolesForObject = session.user.roles.filter((role) => role.objectId === null || role.objectId === source.objectId);
+  const canWrite = rolesForObject.some((role) =>
     ["admin", "owner", "pm", "foreman", "subcontractor", "inspector"].includes(
       role.code,
     ),
   );
-  const canReview = session.user.roles.some((role) =>
-    ["admin", "owner", "pm", "inspector"].includes(role.code),
+  const canReview = rolesForObject.some((role) =>
+    ["admin", "owner", "pm", "inspector", "customer"].includes(role.code),
   );
-  const canSubmitHiddenWorks = session.user.roles.some((role) =>
+  const canSubmitHiddenWorks = rolesForObject.some((role) =>
     ["admin", "owner", "pm", "inspector"].includes(role.code),
   );
   const load = useCallback(async () => {
     if (!source.objectId) return;
-    const [photoItems, defectItems] = await Promise.all([
+    const [photoItems, defectItems, people] = await Promise.all([
       api.json<PhotoReport[]>(`/api/objects/${source.objectId}/photo-reports`),
       api.json<Defect[]>(`/api/objects/${source.objectId}/defects`),
+      api.json<Assignee[]>(`/api/objects/${source.objectId}/defect-assignees`),
     ]);
     setReports(photoItems);
     setDefects(defectItems);
+    setAssignees(people);
+    setAssignedToId((current) => current || people[0]?.id || "");
   }, [source.objectId]);
   useEffect(() => {
     void load().catch((e) => setError(String(e)));
   }, [load]);
   const createReport = async (event: FormEvent) => {
     event.preventDefault();
-    if (!file) return;
-    const photo = await upload(file);
+    if (!reportFiles.length) return;
+    const coordinates = await getCurrentCoordinates();
+    const angleNames = angles.split(",").map((item) => item.trim()).filter(Boolean);
+    if (angleNames.length !== reportFiles.length) throw new Error("Для каждого ракурса выбери отдельное фото");
+    const uploaded = await Promise.all(reportFiles.map((item) => upload(item)));
     await api.json(`/api/objects/${source.objectId}/photo-reports`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         authorId: session.user.id,
           kind: reportKind,
-          fileUrl: photo.url,
-          requiredAngles: ["общий"],
-          photos: [{ angle: "общий", uri: photo.url }],
+          shootingPoint,
+          fileUrl: uploaded[0].url,
+          requiredAngles: angleNames,
+          photos: uploaded.map((photo, index) => ({ angle: angleNames[index], uri: photo.url })),
           status: "review",
+          geoLat: coordinates.latitude,
+          geoLng: coordinates.longitude,
         }),
     });
-    setFile(null);
+    setReportFiles([]);
     setReportKind("progress");
+    setShootingPoint("");
     await load();
   };
   const createDefect = async (event: FormEvent) => {
     event.preventDefault();
-    if (!file) return;
-    const photo = await upload(file);
+    if (!defectFile || !assignedToId) return;
+    const photo = await upload(defectFile);
     await api.json(`/api/objects/${source.objectId}/defects`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -436,18 +458,35 @@ export function PhotoControl({ session }: { session: UserSession }) {
         reportedBy: session.user.id,
         description,
         beforePhotos: [photo.url],
+        assignedToId,
+        ...(dueAt ? { dueAt: new Date(`${dueAt}T23:59:59`).toISOString() } : {}),
       }),
     });
     setDescription("");
-    setFile(null);
+    setDefectFile(null);
+    setDueAt("");
     await load();
   };
   const review = async (id: string, decision: "accepted" | "rejected") => {
+    const note = reviewNotes[id] || "";
+    if (decision === "rejected" && !note.trim()) return;
     await api.json(`/api/photo-reports/${id}/review`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ decision, note: "" }),
+      body: JSON.stringify({ decision, note }),
     });
+    await load();
+  };
+  const updateDefect = async (defect: Defect, status: "in_progress" | "review" | "closed") => {
+    let afterPhotos: string[] | undefined;
+    if (status === "review") {
+      const selected = afterFile[defect.id];
+      if (!selected) return;
+      afterPhotos = [(await upload(selected)).url];
+    }
+    const note = reviewNotes[defect.id] || undefined;
+    await api.json(`/api/defects/${defect.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status, afterPhotos, note }) });
+    setAfterFile((items) => ({ ...items, [defect.id]: null }));
     await load();
   };
   return (
@@ -473,11 +512,13 @@ export function PhotoControl({ session }: { session: UserSession }) {
               </span>
               {canReview && report.status === "review" && (
                 <div className="decision-actions">
+                  <input aria-label="Комментарий к фотоотчету" placeholder="Комментарий при отклонении" value={reviewNotes[report.id] || ""} onChange={(event) => setReviewNotes({ ...reviewNotes, [report.id]: event.target.value })} />
                   <button onClick={() => void review(report.id, "accepted")}>
                     Принять
                   </button>
                   <button
                     className="danger"
+                    disabled={!reviewNotes[report.id]?.trim()}
                     onClick={() => void review(report.id, "rejected")}
                   >
                     Отклонить
@@ -504,12 +545,21 @@ export function PhotoControl({ session }: { session: UserSession }) {
                 </select>
               </label>
               <label>
+                Точка съемки
+                <input required value={shootingPoint} onChange={(event) => setShootingPoint(event.target.value)} />
+              </label>
+              <label>
+                Ракурсы через запятую
+                <input required value={angles} onChange={(event) => setAngles(event.target.value)} />
+              </label>
+              <label>
                 Фото
                 <input
                   required
                   type="file"
                   accept="image/*"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  multiple
+                  onChange={(e) => setReportFiles(Array.from(e.target.files ?? []))}
                 />
               </label>
               <button>Отправить</button>
@@ -529,6 +579,13 @@ export function PhotoControl({ session }: { session: UserSession }) {
                   Фото до
                 </a>
               ))}
+              {defect.afterPhotos.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer">Фото после</a>)}
+              {defect.assignedTo && <small>Ответственный: {defect.assignedTo.fullName}</small>}
+              {defect.dueAt && <small>Срок: {new Date(defect.dueAt).toLocaleDateString("ru-RU")}</small>}
+              {defect.reviewNote && <p className="error">Отклонено: {defect.reviewNote}</p>}
+              {canWrite && defect.status === "open" && <button onClick={() => void updateDefect(defect, "in_progress")}>Взять в работу</button>}
+              {canWrite && defect.status === "in_progress" && <><label>Фото после<input aria-label={`Фото после ${defect.description}`} type="file" accept="image/*" onChange={(event) => setAfterFile({ ...afterFile, [defect.id]: event.target.files?.[0] ?? null })} /></label><button disabled={!afterFile[defect.id]} onClick={() => void updateDefect(defect, "review")}>Отправить на проверку</button></>}
+              {canReview && defect.status === "review" && <div className="decision-actions"><input aria-label={`Комментарий ${defect.description}`} placeholder="Комментарий при отклонении" value={reviewNotes[defect.id] || ""} onChange={(event) => setReviewNotes({ ...reviewNotes, [defect.id]: event.target.value })} /><button onClick={() => void updateDefect(defect, "closed")}>Принять</button><button className="danger" disabled={!reviewNotes[defect.id]?.trim()} onClick={() => void updateDefect(defect, "in_progress")}>Отклонить</button></div>}
             </article>
           ))}
           {canWrite && (
@@ -543,12 +600,20 @@ export function PhotoControl({ session }: { session: UserSession }) {
                 />
               </label>
               <label>
+                Ответственный
+                <select required value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)}>{assignees.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select>
+              </label>
+              <label>
+                Срок
+                <input required type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+              </label>
+              <label>
                 Фото
                 <input
                   required
                   type="file"
                   accept="image/*"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => setDefectFile(e.target.files?.[0] ?? null)}
                 />
               </label>
               <button>Создать замечание</button>

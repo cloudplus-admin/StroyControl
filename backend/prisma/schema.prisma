@@ -51,6 +51,7 @@ model User {
   reviewAssignments    Task[] @relation("TaskReviewer")
   authoredPhotoReports PhotoReport[]
   reportedDefects      Defect[]
+  assignedDefects      Defect[] @relation("DefectAssignee")
   feedEvents           FeedEvent[]
   feedReactions        FeedReaction[]
   roles                UserRole[]
@@ -291,16 +292,20 @@ model Defect {
   task       Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
   reportedBy String   @map("reported_by")
   reporter   User     @relation(fields: [reportedBy], references: [id])
-  status     String   @default("open") // open | in_progress | verified | closed
+  assignedToId String? @map("assigned_to_id")
+  assignedTo   User?   @relation("DefectAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  status     String   @default("open") // open | in_progress | review | closed
   description String
   beforePhotos Json     @default("[]") @map("before_photos")
   afterPhotos  Json     @default("[]") @map("after_photos")
   dueAt        DateTime? @map("due_at")
+  reviewNote   String?   @map("review_note")
   resolvedAt   DateTime? @map("resolved_at")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@index([objectId])
+  @@index([assignedToId])
   @@map("defects")
 }
 

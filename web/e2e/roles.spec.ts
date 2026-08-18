@@ -23,6 +23,8 @@ async function mockApi(page: Page) {
     if (path === `/api/objects/${objectId}/documents`) return json(request.method() === "GET" ? [document] : { id: "document-new" }, request.method() === "GET" ? 200 : 201);
     if (path === `/api/objects/${objectId}/acts`) return json(request.method() === "GET" ? [act] : { id: "act-new" }, request.method() === "GET" ? 200 : 201);
     if (path === `/api/objects/${objectId}/gantt`) return json(gantt);
+    if (path === `/api/objects/${objectId}/photo-reports` || path === `/api/objects/${objectId}/defects`) return json([]);
+    if (path === `/api/objects/${objectId}/defect-assignees`) return json([{ id: "user-foreman", fullName: "Тест foreman" }]);
     if (path === "/api/tasks/task-1") return json({ ...gantt.stages[0].sections[0].tasks[0], closurePhotos: [] });
     if (path === "/api/uploads") return json({ id: "upload-1", url: "http://127.0.0.1:3000/api/uploads/upload-1" }, 201);
     if (path === "/api/planning/users" || path === "/api/admin/users" || path === "/api/admin/roles") return json([]);
@@ -76,6 +78,33 @@ test("прораб закрывает задачу с координатами �
   expect((await closeRequest).postDataJSON()).toMatchObject({ photoUrls: ["http://127.0.0.1:3000/api/uploads/upload-1"], geoLat: 41.311081, geoLng: 69.240562 });
   await page.getByRole("button", { name: "Документы и акты" }).click();
   await expect(page.getByRole("heading", { name: "Добавить документ" })).toHaveCount(0);
+});
+
+test("прораб отправляет фото по точке и ракурсам и создает назначенное замечание", async ({ page, context }) => {
+  await context.grantPermissions(["geolocation"], { origin: "http://127.0.0.1:48741" });
+  await context.setGeolocation({ latitude: 41.311081, longitude: 69.240562 });
+  await login(page, "foreman");
+  await page.getByRole("button", { name: "Фотоконтроль" }).click();
+
+  const reportForm = page.getByRole("heading", { name: "Новый фотоотчет" }).locator("..");
+  await reportForm.getByLabel("Точка съемки").fill("Ось А-4");
+  await reportForm.getByLabel("Ракурсы через запятую").fill("Общий, Узел");
+  await reportForm.getByLabel("Фото").setInputFiles([
+    { name: "overview.jpg", mimeType: "image/jpeg", buffer: Buffer.from("overview") },
+    { name: "detail.jpg", mimeType: "image/jpeg", buffer: Buffer.from("detail") },
+  ]);
+  const reportRequest = page.waitForRequest((request) => request.url().endsWith(`/api/objects/${objectId}/photo-reports`) && request.method() === "POST");
+  await reportForm.getByRole("button", { name: "Отправить" }).click();
+  expect((await reportRequest).postDataJSON()).toMatchObject({ shootingPoint: "Ось А-4", requiredAngles: ["Общий", "Узел"], geoLat: 41.311081, geoLng: 69.240562 });
+
+  const defectForm = page.getByRole("heading", { name: "Новое замечание" }).locator("..");
+  await defectForm.getByLabel("Описание").fill("Скол защитного слоя");
+  await defectForm.getByLabel("Ответственный").selectOption("user-foreman");
+  await defectForm.getByLabel("Срок").fill("2026-08-25");
+  await defectForm.getByLabel("Фото").setInputFiles({ name: "before.jpg", mimeType: "image/jpeg", buffer: Buffer.from("before") });
+  const defectRequest = page.waitForRequest((request) => request.url().endsWith(`/api/objects/${objectId}/defects`) && request.method() === "POST");
+  await defectForm.getByRole("button", { name: "Создать замечание" }).click();
+  expect((await defectRequest).postDataJSON()).toMatchObject({ description: "Скол защитного слоя", assignedToId: "user-foreman" });
 });
 
 for (const role of ["inspector", "customer"] as const) {

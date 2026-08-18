@@ -103,7 +103,7 @@ describe('Defects (журнал замечаний)', () => {
     const createRes = await request(app)
       .post(`/api/objects/${object.id}/defects`)
       .set('x-company-id', company.id)
-      .send({ reportedBy: user.id, description: 'Отсутствие СИЗ у рабочих на 6 этаже', beforePhotos: ['https://example.com/before.jpg'] });
+      .send({ reportedBy: user.id, assignedToId: user.id, description: 'Отсутствие СИЗ у рабочих на 6 этаже', beforePhotos: ['https://example.com/before.jpg'] });
     expect(createRes.status).toBe(201);
     expect(createRes.body.status).toBe('open');
 
@@ -123,7 +123,7 @@ describe('Defects (журнал замечаний)', () => {
     const createRes = await request(app)
       .post(`/api/objects/${object.id}/defects`)
       .set('x-company-id', company.id)
-      .send({ reportedBy: user.id, description: 'Неровность кладки', beforePhotos: ['https://example.com/before.jpg'] });
+      .send({ reportedBy: user.id, assignedToId: user.id, description: 'Неровность кладки', beforePhotos: ['https://example.com/before.jpg'] });
 
     const updateRes = await request(app)
       .patch(`/api/defects/${createRes.body.id}`)
@@ -150,21 +150,32 @@ describe('Defects (журнал замечаний)', () => {
     const noBefore = await request(app)
       .post(`/api/objects/${object.id}/defects`)
       .set('x-company-id', company.id)
-      .send({ reportedBy: user.id, description: 'Дефект без фото' });
+      .send({ reportedBy: user.id, assignedToId: user.id, description: 'Дефект без фото' });
     expect(noBefore.status).toBe(400);
 
     const created = await request(app)
       .post(`/api/objects/${object.id}/defects`)
       .set('x-company-id', company.id)
-      .send({ reportedBy: user.id, description: 'Трещина', beforePhotos: ['https://example.com/before.jpg'] });
-    const skipped = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'verified' });
+      .send({ reportedBy: user.id, assignedToId: user.id, description: 'Трещина', beforePhotos: ['https://example.com/before.jpg'] });
+    const skipped = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'review' });
     expect(skipped.status).toBe(409);
     await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'in_progress' }).expect(200);
-    const withoutAfter = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'verified' });
+    const withoutAfter = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'review' });
     expect(withoutAfter.status).toBe(422);
-    const verified = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'verified', afterPhotos: ['https://example.com/after.jpg'] });
+    const verified = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'review', afterPhotos: ['https://example.com/after.jpg'] });
     expect(verified.status).toBe(200);
     const closed = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'closed' });
     expect(closed.body.resolvedAt).toBeTruthy();
+  });
+
+  it('requires a comment when a reviewer rejects a defect', async () => {
+    const { company, object, user } = await seedCompanyWithObjectAndUser();
+    const created = await request(app).post(`/api/objects/${object.id}/defects`).set('x-company-id', company.id)
+      .send({ reportedBy: user.id, assignedToId: user.id, description: 'Скол бетона', beforePhotos: ['https://example.com/before.jpg'] });
+    await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'in_progress' }).expect(200);
+    await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'review', afterPhotos: ['https://example.com/after.jpg'] }).expect(200);
+    await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'in_progress' }).expect(422);
+    const rejected = await request(app).patch(`/api/defects/${created.body.id}`).set('x-company-id', company.id).send({ status: 'in_progress', note: 'Переделать кромку' }).expect(200);
+    expect(rejected.body).toMatchObject({ status: 'in_progress', reviewNote: 'Переделать кромку' });
   });
 });
