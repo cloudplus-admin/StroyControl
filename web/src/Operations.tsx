@@ -51,6 +51,29 @@ type Assignee = { id: string; fullName: string };
 
 type Coordinates = { latitude: number; longitude: number; accuracy: number };
 
+const operationCopy = {
+  ru: {
+    object: "Объект", planEyebrow: "ПЛАН И КРИТИЧЕСКИЙ ПУТЬ", schedule: "График Ганта",
+    baseline: "Зафиксировать baseline", forecast: "Прогноз сдачи", noData: "нет данных", shift: "Сдвиг", days: "дн.", onPlan: "По плану", critical: "Критический путь",
+    acceptanceEyebrow: "ЗАКРЫТИЕ И ТЕХНАДЗОР", acceptance: "Приемка задач", closurePhoto: "Фото закрытия", photo: "Фото",
+    locating: "Определяем геолокацию...", closeTask: "Закрыть задачу", geoHint: "При закрытии браузер запросит доступ к точной геолокации.", comment: "Комментарий", accept: "Принять", reject: "Отклонить",
+    qualityEyebrow: "ФОТОФИКСАЦИЯ И КАЧЕСТВО", quality: "Фотоконтроль и замечания", reports: "Фотоотчеты", openPhoto: "Открыть фото", rejectionComment: "Комментарий при отклонении",
+    newReport: "Новый фотоотчет", type: "Тип", progress: "Ход работ", hiddenWorks: "Скрытые работы - на приемку", shootingPoint: "Точка съемки", angles: "Ракурсы через запятую", send: "Отправить",
+    defects: "Замечания", beforePhoto: "Фото до", afterPhoto: "Фото после", responsible: "Ответственный", deadline: "Срок", rejected: "Отклонено", takeWork: "Взять в работу", sendReview: "Отправить на проверку",
+    newDefect: "Новое замечание", description: "Описание", createDefect: "Создать замечание", generalAngle: "Общий", angleMismatch: "Для каждого ракурса выбери отдельное фото", uploadError: "Загрузка",
+  },
+  uz: {
+    object: "Obyekt", planEyebrow: "REJA VA KRITIK YO'L", schedule: "Gantt jadvali",
+    baseline: "Asosiy rejani belgilash", forecast: "Yakunlash prognozi", noData: "ma'lumot yo'q", shift: "Siljish", days: "kun", onPlan: "Reja bo'yicha", critical: "Kritik yo'l",
+    acceptanceEyebrow: "YAKUNLASH VA TEXNIK NAZORAT", acceptance: "Vazifalarni qabul qilish", closurePhoto: "Yakunlash fotosi", photo: "Foto",
+    locating: "Joylashuv aniqlanmoqda...", closeTask: "Vazifani yopish", geoHint: "Yopishda brauzer aniq joylashuvga ruxsat so'raydi.", comment: "Izoh", accept: "Qabul qilish", reject: "Rad etish",
+    qualityEyebrow: "FOTO QAYD VA SIFAT", quality: "Foto nazorat va kamchiliklar", reports: "Fotohisobotlar", openPhoto: "Fotoni ochish", rejectionComment: "Rad etish izohi",
+    newReport: "Yangi fotohisobot", type: "Turi", progress: "Ish jarayoni", hiddenWorks: "Yashirin ishlar - qabulga", shootingPoint: "Suratga olish nuqtasi", angles: "Rakuslarni vergul bilan kiriting", send: "Yuborish",
+    defects: "Kamchiliklar", beforePhoto: "Oldingi foto", afterPhoto: "Keyingi foto", responsible: "Mas'ul", deadline: "Muddat", rejected: "Rad etildi", takeWork: "Ishga olish", sendReview: "Tekshiruvga yuborish",
+    newDefect: "Yangi kamchilik", description: "Tavsif", createDefect: "Kamchilik yaratish", generalAngle: "Umumiy", angleMismatch: "Har bir rakurs uchun alohida foto tanlang", uploadError: "Yuklash",
+  },
+} as const;
+
 export function getCurrentCoordinates(): Promise<Coordinates> {
   if (!navigator.geolocation) {
     return Promise.reject(new Error("Геолокация не поддерживается этим браузером"));
@@ -87,10 +110,11 @@ function Picker({
   objects,
   objectId,
   setObjectId,
-}: ReturnType<typeof useObjects>) {
+  lang,
+}: ReturnType<typeof useObjects> & { lang: Lang }) {
   return (
     <label className="object-picker">
-      Объект
+      {operationCopy[lang].object}
       <select
         value={objectId}
         onChange={(event) => setObjectId(event.target.value)}
@@ -105,7 +129,8 @@ function Picker({
   );
 }
 
-export function Schedule({ canPlan }: { lang: Lang; canPlan: boolean }) {
+export function Schedule({ lang, canPlan }: { lang: Lang; canPlan: boolean }) {
+  const c = operationCopy[lang];
   const source = useObjects();
   const [data, setData] = useState<Gantt | null>(null);
   const [error, setError] = useState("");
@@ -139,8 +164,8 @@ export function Schedule({ canPlan }: { lang: Lang; canPlan: boolean }) {
     <>
       <header>
         <div>
-          <p className="eyebrow">ПЛАН И КРИТИЧЕСКИЙ ПУТЬ</p>
-          <h1>График Ганта</h1>
+          <p className="eyebrow">{c.planEyebrow}</p>
+          <h1>{c.schedule}</h1>
         </div>
         {canPlan && (
           <button
@@ -152,31 +177,31 @@ export function Schedule({ canPlan }: { lang: Lang; canPlan: boolean }) {
                 .then(load)
             }
           >
-            Зафиксировать baseline
+            {c.baseline}
           </button>
         )}
       </header>
-      <Picker {...source} />
+      <Picker {...source} lang={lang} />
       {error && <p className="error">{error}</p>}
       {data && (
         <>
           <div className="forecast">
             <strong>
-              Прогноз сдачи:{" "}
+              {c.forecast}:{" "}
               {data.forecast.forecastCompletion
                 ? new Date(data.forecast.forecastCompletion).toLocaleDateString(
-                    "ru-RU",
+                    lang === "ru" ? "ru-RU" : "uz-UZ",
                   )
-                : "нет данных"}
+                : c.noData}
             </strong>
             <span className={data.forecast.delayDays ? "delay" : ""}>
               {data.forecast.delayDays
-                ? `Сдвиг +${data.forecast.delayDays} дн.`
-                : "По плану"}
+                ? `${c.shift} +${data.forecast.delayDays} ${c.days}`
+                : c.onPlan}
             </span>
-            <span>Критический путь: {data.criticalPath.durationDays} дн.</span>
+            <span>{c.critical}: {data.criticalPath.durationDays} {c.days}</span>
           </div>
-          <section className="gantt" aria-label="График Ганта">
+          <section className="gantt" aria-label={c.schedule}>
             {tasks.map((task) => {
               const start = task.plannedStart
                 ? new Date(task.plannedStart).getTime()
@@ -224,11 +249,12 @@ async function upload(file: File, taskId?: string) {
     },
     body: file,
   });
-  if (!response.ok) throw new Error(`Загрузка: HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`Upload: HTTP ${response.status}`);
   return response.json() as Promise<{ url: string }>;
 }
 
-export function Acceptance({ session }: { session: UserSession }) {
+export function Acceptance({ lang, session }: { lang: Lang; session: UserSession }) {
+  const c = operationCopy[lang];
   const source = useObjects();
   const [gantt, setGantt] = useState<Gantt | null>(null);
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -298,11 +324,11 @@ export function Acceptance({ session }: { session: UserSession }) {
     <>
       <header>
         <div>
-          <p className="eyebrow">ЗАКРЫТИЕ И ТЕХНАДЗОР</p>
-          <h1>Приемка задач</h1>
+          <p className="eyebrow">{c.acceptanceEyebrow}</p>
+          <h1>{c.acceptance}</h1>
         </div>
       </header>
-      <Picker {...source} />
+      <Picker {...source} lang={lang} />
       {error && <p className="error">{error}</p>}
       <div className="task-layout">
         <section>
@@ -324,14 +350,14 @@ export function Acceptance({ session }: { session: UserSession }) {
             <h3>{task.title}</h3>
             {task.closurePhotos?.map((url) => (
               <a key={url} href={url} target="_blank" rel="noreferrer">
-                Фото закрытия
+                {c.closurePhoto}
               </a>
             ))}
             {task.reviewNote && <p>{task.reviewNote}</p>}
             {canClose && !["review", "done"].includes(task.status) && (
               <>
                 <label>
-                  Фото
+                  {c.photo}
                   <input
                     type="file"
                     multiple
@@ -343,15 +369,15 @@ export function Acceptance({ session }: { session: UserSession }) {
                   disabled={!files.length || isClosing}
                   onClick={() => void close().catch((e) => setError(String(e)))}
                 >
-                  {isClosing ? "Определяем геолокацию..." : "Закрыть задачу"}
+                  {isClosing ? c.locating : c.closeTask}
                 </button>
-                <small>При закрытии браузер запросит доступ к точной геолокации.</small>
+                <small>{c.geoHint}</small>
               </>
             )}
             {canReview && task.status === "review" && (
               <>
                 <label>
-                  Комментарий
+                  {c.comment}
                   <input
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
@@ -359,14 +385,14 @@ export function Acceptance({ session }: { session: UserSession }) {
                 </label>
                 <div className="decision-actions">
                   <button onClick={() => void review("accepted")}>
-                    Принять
+                    {c.accept}
                   </button>
                   <button
                     className="danger"
                     disabled={!note.trim()}
                     onClick={() => void review("rejected")}
                   >
-                    Отклонить
+                    {c.reject}
                   </button>
                 </div>
               </>
@@ -378,7 +404,8 @@ export function Acceptance({ session }: { session: UserSession }) {
   );
 }
 
-export function PhotoControl({ session }: { session: UserSession }) {
+export function PhotoControl({ lang, session }: { lang: Lang; session: UserSession }) {
+  const c = operationCopy[lang];
   const source = useObjects();
   const [reports, setReports] = useState<PhotoReport[]>([]);
   const [defects, setDefects] = useState<Defect[]>([]);
@@ -389,7 +416,7 @@ export function PhotoControl({ session }: { session: UserSession }) {
   const [description, setDescription] = useState("");
   const [reportKind, setReportKind] = useState("progress");
   const [shootingPoint, setShootingPoint] = useState("");
-  const [angles, setAngles] = useState("Общий");
+  const [angles, setAngles] = useState<string>(c.generalAngle);
   const [dueAt, setDueAt] = useState("");
   const [assignees, setAssignees] = useState<Assignee[]>([]);
   const [assignedToId, setAssignedToId] = useState("");
@@ -426,7 +453,7 @@ export function PhotoControl({ session }: { session: UserSession }) {
     if (!reportFiles.length) return;
     const coordinates = await getCurrentCoordinates();
     const angleNames = angles.split(",").map((item) => item.trim()).filter(Boolean);
-    if (angleNames.length !== reportFiles.length) throw new Error("Для каждого ракурса выбери отдельное фото");
+    if (angleNames.length !== reportFiles.length) throw new Error(c.angleMismatch);
     const uploaded = await Promise.all(reportFiles.map((item) => upload(item)));
     await api.json(`/api/objects/${source.objectId}/photo-reports`, {
       method: "POST",
@@ -494,35 +521,35 @@ export function PhotoControl({ session }: { session: UserSession }) {
     <>
       <header>
         <div>
-          <p className="eyebrow">ФОТОФИКСАЦИЯ И КАЧЕСТВО</p>
-          <h1>Фотоконтроль и замечания</h1>
+          <p className="eyebrow">{c.qualityEyebrow}</p>
+          <h1>{c.quality}</h1>
         </div>
       </header>
-      <Picker {...source} />
+      <Picker {...source} lang={lang} />
       {error && <p className="error">{error}</p>}
       <div className="document-layout">
         <section className="document-column">
-          <h2>Фотоотчеты</h2>
+          <h2>{c.reports}</h2>
           {reports.map((report) => (
             <article className="document-card" key={report.id}>
               <a href={report.fileUrl} target="_blank" rel="noreferrer">
-                Открыть фото
+                {c.openPhoto}
               </a>
               <span className={`task-status ${report.status}`}>
                 {report.status}
               </span>
               {canReview && report.status === "review" && (
                 <div className="decision-actions">
-                  <input aria-label="Комментарий к фотоотчету" placeholder="Комментарий при отклонении" value={reviewNotes[report.id] || ""} onChange={(event) => setReviewNotes({ ...reviewNotes, [report.id]: event.target.value })} />
+                  <input aria-label={c.comment} placeholder={c.rejectionComment} value={reviewNotes[report.id] || ""} onChange={(event) => setReviewNotes({ ...reviewNotes, [report.id]: event.target.value })} />
                   <button onClick={() => void review(report.id, "accepted")}>
-                    Принять
+                    {c.accept}
                   </button>
                   <button
                     className="danger"
                     disabled={!reviewNotes[report.id]?.trim()}
                     onClick={() => void review(report.id, "rejected")}
                   >
-                    Отклонить
+                    {c.reject}
                   </button>
                 </div>
               )}
@@ -530,31 +557,31 @@ export function PhotoControl({ session }: { session: UserSession }) {
           ))}
           {canWrite && (
             <form className="panel compact" onSubmit={createReport}>
-              <h3>Новый фотоотчет</h3>
+              <h3>{c.newReport}</h3>
               <label>
-                Тип
+                {c.type}
                 <select
                   value={reportKind}
                   onChange={(event) => setReportKind(event.target.value)}
                 >
-                  <option value="progress">Ход работ</option>
+                  <option value="progress">{c.progress}</option>
                   {canSubmitHiddenWorks && (
                     <option value="hidden_works">
-                      Скрытые работы - на приемку
+                      {c.hiddenWorks}
                     </option>
                   )}
                 </select>
               </label>
               <label>
-                Точка съемки
+                {c.shootingPoint}
                 <input required value={shootingPoint} onChange={(event) => setShootingPoint(event.target.value)} />
               </label>
               <label>
-                Ракурсы через запятую
+                {c.angles}
                 <input required value={angles} onChange={(event) => setAngles(event.target.value)} />
               </label>
               <label>
-                Фото
+                {c.photo}
                 <input
                   required
                   type="file"
@@ -563,12 +590,12 @@ export function PhotoControl({ session }: { session: UserSession }) {
                   onChange={(e) => setReportFiles(Array.from(e.target.files ?? []))}
                 />
               </label>
-              <button>Отправить</button>
+              <button>{c.send}</button>
             </form>
           )}
         </section>
         <section className="document-column">
-          <h2>Замечания</h2>
+          <h2>{c.defects}</h2>
           {defects.map((defect) => (
             <article className="document-card" key={defect.id}>
               <strong>{defect.description}</strong>
@@ -577,23 +604,23 @@ export function PhotoControl({ session }: { session: UserSession }) {
               </span>
               {defect.beforePhotos.map((url) => (
                 <a key={url} href={url} target="_blank" rel="noreferrer">
-                  Фото до
+                  {c.beforePhoto}
                 </a>
               ))}
-              {defect.afterPhotos.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer">Фото после</a>)}
-              {defect.assignedTo && <small>Ответственный: {defect.assignedTo.fullName}</small>}
-              {defect.dueAt && <small>Срок: {new Date(defect.dueAt).toLocaleDateString("ru-RU")}</small>}
-              {defect.reviewNote && <p className="error">Отклонено: {defect.reviewNote}</p>}
-              {canWrite && defect.status === "open" && <button onClick={() => void updateDefect(defect, "in_progress")}>Взять в работу</button>}
-              {canWrite && defect.status === "in_progress" && <><label>Фото после<input aria-label={`Фото после ${defect.description}`} type="file" accept="image/*" onChange={(event) => setAfterFile({ ...afterFile, [defect.id]: event.target.files?.[0] ?? null })} /></label><button disabled={!afterFile[defect.id]} onClick={() => void updateDefect(defect, "review")}>Отправить на проверку</button></>}
-              {canReview && defect.status === "review" && <div className="decision-actions"><input aria-label={`Комментарий ${defect.description}`} placeholder="Комментарий при отклонении" value={reviewNotes[defect.id] || ""} onChange={(event) => setReviewNotes({ ...reviewNotes, [defect.id]: event.target.value })} /><button onClick={() => void updateDefect(defect, "closed")}>Принять</button><button className="danger" disabled={!reviewNotes[defect.id]?.trim()} onClick={() => void updateDefect(defect, "in_progress")}>Отклонить</button></div>}
+              {defect.afterPhotos.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer">{c.afterPhoto}</a>)}
+              {defect.assignedTo && <small>{c.responsible}: {defect.assignedTo.fullName}</small>}
+              {defect.dueAt && <small>{c.deadline}: {new Date(defect.dueAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "uz-UZ")}</small>}
+              {defect.reviewNote && <p className="error">{c.rejected}: {defect.reviewNote}</p>}
+              {canWrite && defect.status === "open" && <button onClick={() => void updateDefect(defect, "in_progress")}>{c.takeWork}</button>}
+              {canWrite && defect.status === "in_progress" && <><label>{c.afterPhoto}<input aria-label={`${c.afterPhoto} ${defect.description}`} type="file" accept="image/*" onChange={(event) => setAfterFile({ ...afterFile, [defect.id]: event.target.files?.[0] ?? null })} /></label><button disabled={!afterFile[defect.id]} onClick={() => void updateDefect(defect, "review")}>{c.sendReview}</button></>}
+              {canReview && defect.status === "review" && <div className="decision-actions"><input aria-label={`${c.comment} ${defect.description}`} placeholder={c.rejectionComment} value={reviewNotes[defect.id] || ""} onChange={(event) => setReviewNotes({ ...reviewNotes, [defect.id]: event.target.value })} /><button onClick={() => void updateDefect(defect, "closed")}>{c.accept}</button><button className="danger" disabled={!reviewNotes[defect.id]?.trim()} onClick={() => void updateDefect(defect, "in_progress")}>{c.reject}</button></div>}
             </article>
           ))}
           {canWrite && (
             <form className="panel compact" onSubmit={createDefect}>
-              <h3>Новое замечание</h3>
+              <h3>{c.newDefect}</h3>
               <label>
-                Описание
+                {c.description}
                 <textarea
                   required
                   value={description}
@@ -601,15 +628,15 @@ export function PhotoControl({ session }: { session: UserSession }) {
                 />
               </label>
               <label>
-                Ответственный
+                {c.responsible}
                 <select required value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)}>{assignees.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select>
               </label>
               <label>
-                Срок
+                {c.deadline}
                 <input required type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
               </label>
               <label>
-                Фото
+                {c.photo}
                 <input
                   required
                   type="file"
@@ -617,7 +644,7 @@ export function PhotoControl({ session }: { session: UserSession }) {
                   onChange={(e) => setDefectFile(e.target.files?.[0] ?? null)}
                 />
               </label>
-              <button>Создать замечание</button>
+              <button>{c.createDefect}</button>
             </form>
           )}
         </section>

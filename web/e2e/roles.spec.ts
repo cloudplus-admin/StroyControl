@@ -7,7 +7,12 @@ type Role = (typeof roles)[number];
 const object = { id: objectId, name: "ЖК Тестовый", address: "Ташкент", progress: 45, taskCount: 1, riskLevel: "medium" };
 const document = { id: "document-1", title: "Рабочий проект", kind: "project", version: 1, fileUrl: "http://files.test/project.pdf", status: "review", createdBy: { fullName: "РП" }, approvals: [] };
 const act = { id: "act-1", number: "А-1", title: "Монолит", template: "completed", amount: 120000, status: "review", pdfUrl: "http://files.test/act.pdf", createdBy: { fullName: "РП" } };
-const gantt = { stages: [{ id: "stage-1", name: "Этап", sections: [{ id: "section-1", name: "Раздел", tasks: [{ id: "task-1", title: "Армирование", status: "in_progress", priority: "high", plannedStart: "2026-08-01", plannedEnd: "2026-08-20", progress: 50, riskLevel: "medium", dependsOn: [] }] }] }] };
+const gantt = {
+  objectName: object.name,
+  criticalPath: { taskIds: ["task-1"], durationDays: 20 },
+  forecast: { plannedCompletion: "2026-08-20", forecastCompletion: "2026-08-22", delayDays: 2 },
+  stages: [{ id: "stage-1", name: "Этап", sections: [{ id: "section-1", name: "Раздел", tasks: [{ id: "task-1", title: "Армирование", status: "in_progress", priority: "high", plannedStart: "2026-08-01", plannedEnd: "2026-08-20", progress: 50, riskLevel: "medium", dependsOn: [] }] }] }],
+};
 const objectDetail = { ...object, stages: gantt.stages };
 
 async function mockApi(page: Page) {
@@ -138,3 +143,24 @@ for (const role of ["inspector", "customer"] as const) {
     expect((await signRequest).method()).toBe("POST");
   });
 }
+
+test("узбекская локализация покрывает новые рабочие экраны", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "UZ" }).click();
+  await page.getByLabel("Email yoki login").fill("pm");
+  await page.getByLabel("Parol").fill("test-password");
+  await page.getByRole("button", { name: "Kirish" }).click();
+
+  await page.getByRole("button", { name: "Gantt jadvali" }).click();
+  await expect(page.getByRole("heading", { name: "Gantt jadvali" })).toBeVisible();
+  await expect(page.getByText(/Yakunlash prognozi/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Vazifalarni qabul qilish" }).click();
+  await expect(page.getByRole("heading", { name: "Vazifalarni qabul qilish" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Foto nazorat" }).click();
+  await expect(page.getByRole("heading", { name: "Foto nazorat va kamchiliklar" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Yangi fotohisobot" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Yangi kamchilik" })).toBeVisible();
+});

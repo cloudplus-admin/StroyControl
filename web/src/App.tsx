@@ -102,6 +102,9 @@ const copy = {
     object: "Объект",
     wholeCompany: "Вся компания",
     createUser: "Создать пользователя",
+    schedule: "График Ганта",
+    acceptance: "Приемка задач",
+    photoControl: "Фотоконтроль",
   },
   uz: {
     loginError: "Kirish xatosi",
@@ -152,6 +155,9 @@ const copy = {
     object: "Obyekt",
     wholeCompany: "Butun kompaniya",
     createUser: "Foydalanuvchi yaratish",
+    schedule: "Gantt jadvali",
+    acceptance: "Vazifalarni qabul qilish",
+    photoControl: "Foto nazorat",
   },
 } as const;
 type Copy = typeof copy.ru | typeof copy.uz;
@@ -301,9 +307,9 @@ function Workspace({
           >
             {c.objects}
           </button>
-          <button className={tab === "schedule" ? "active" : ""} onClick={() => setTab("schedule")}>График Ганта</button>
-          <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>Приемка задач</button>
-          <button className={tab === "photo" ? "active" : ""} onClick={() => setTab("photo")}>Фотоконтроль</button>
+          <button className={tab === "schedule" ? "active" : ""} onClick={() => setTab("schedule")}>{c.schedule}</button>
+          <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>{c.acceptance}</button>
+          <button className={tab === "photo" ? "active" : ""} onClick={() => setTab("photo")}>{c.photoControl}</button>
           <button
             className={tab === "documents" ? "active" : ""}
             onClick={() => setTab("documents")}
@@ -331,9 +337,9 @@ function Workspace({
         ) : tab === "schedule" ? (
           <Schedule lang={lang} canPlan={canPlan} />
         ) : tab === "acceptance" ? (
-          <Acceptance session={session} />
+          <Acceptance lang={lang} session={session} />
         ) : tab === "photo" ? (
-          <PhotoControl session={session} />
+          <PhotoControl lang={lang} session={session} />
         ) : tab === "documents" ? (
           <Documents
             lang={lang}
