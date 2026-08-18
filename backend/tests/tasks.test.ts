@@ -76,6 +76,28 @@ describe('Task checklist and closure', () => {
     expect(closeRes.status).toBe(400);
   });
 
+  it('blocks closure until dependencies and required checklist are complete', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const dependency = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Подготовка' });
+    const task = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Монтаж', dependsOn: [dependency.body.id] });
+    const checklist = await request(app).post(`/api/tasks/${task.body.id}/checklist`).set('x-company-id', company.id).send({ label: 'Проверить допуск' });
+    const close = (key: string) => request(app).post(`/api/tasks/${task.body.id}/close`).set('x-company-id', company.id).set('idempotency-key', key).send({ photoUrl: 'https://example.com/result.jpg', geoLat: 41.3, geoLng: 69.2 });
+
+    expect((await close('blocked-checklist')).body.error).toContain('checklist');
+    await request(app).patch(`/api/tasks/${task.body.id}/checklist/${checklist.body.id}`).set('x-company-id', company.id).send({ isDone: true });
+    expect((await close('blocked-dependency')).body.error).toContain('dependencies');
+    await prisma.task.update({ where: { id: dependency.body.id }, data: { status: 'done' } });
+    expect((await close('unblocked-task')).status).toBe(200);
+  });
+
+  it('rejects self and cross-object dependencies during editing', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const task = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Основная' });
+    const self = await request(app).patch(`/api/tasks/${task.body.id}`).set('x-company-id', company.id).send({ dependsOn: [task.body.id] });
+    expect(self.status).toBe(400);
+    expect(self.body.error).toBe('invalid_dependencies');
+  });
+
   it('submits a task with multiple photos and geotag for review', async () => {
     const { company, sectionId } = await seedCompanyWithSection();
     const reviewer = await prisma.user.create({ data: { companyId: company.id, email: 'reviewer@example.com', passwordHash: 'hash', fullName: 'Проверяющий' } });

@@ -27,6 +27,9 @@ type ObjectDetail = {
         status: string;
         priority: string;
         plannedEnd?: string;
+        assigneeId?: string;
+        reviewerId?: string;
+        dependsOn: string[];
       }[];
     }[];
   }[];
@@ -84,6 +87,13 @@ const copy = {
     high: "Высокий",
     deadline: "Срок",
     createTask: "Создать задачу",
+    editTask: "Редактировать задачу",
+    checklist: "Обязательный чек-лист",
+    addChecklist: "Добавить пункт",
+    reviewer: "Проверяющий",
+    dependencies: "Зависимости",
+    saveTask: "Сохранить задачу",
+    cancel: "Отмена",
     access: "ДОСТУП И ОТВЕТСТВЕННОСТЬ",
     addEmployee: "Добавить сотрудника",
     fullName: "ФИО",
@@ -127,6 +137,13 @@ const copy = {
     high: "Yuqori",
     deadline: "Muddat",
     createTask: "Vazifa yaratish",
+    editTask: "Vazifani tahrirlash",
+    checklist: "Majburiy tekshiruv ro‘yxati",
+    addChecklist: "Band qo‘shish",
+    reviewer: "Tekshiruvchi",
+    dependencies: "Bog‘liqliklar",
+    saveTask: "Vazifani saqlash",
+    cancel: "Bekor qilish",
     access: "KIRISH VA MAS’ULIYAT",
     addEmployee: "Xodim qo‘shish",
     fullName: "F.I.Sh.",
@@ -473,6 +490,11 @@ function Objects({
   const [assigneeId, setAssigneeId] = useState("");
   const [priority, setPriority] = useState("normal");
   const [plannedEnd, setPlannedEnd] = useState("");
+  const [editingTaskId, setEditingTaskId] = useState("");
+  const [reviewerId, setReviewerId] = useState("");
+  const [dependsOn, setDependsOn] = useState<string[]>([]);
+  const [checklist, setChecklist] = useState<{ id: string; label: string; isDone: boolean }[]>([]);
+  const [newChecklistItem, setNewChecklistItem] = useState("");
   const load = useCallback(async () => {
     try {
       setObjects(await api.json("/api/objects"));
@@ -507,13 +529,53 @@ function Objects({
         assigneeId: assigneeId || null,
         priority,
         plannedEnd: plannedEnd || undefined,
-        dependsOn: [],
+        dependsOn,
       }),
     });
     setTitle("");
     setPlannedEnd("");
+    setDependsOn([]);
     if (selected) await open(selected.id);
     await load();
+  };
+  const allTasks = sections.flatMap((section) => section.tasks);
+  const reviewers = people.filter((person) => person.roles.some((assignment) => assignment.role.code === "inspector" && (assignment.objectId === null || assignment.objectId === selected?.id)));
+  const editTask = async (taskId: string) => {
+    const task = await api.json<{
+      id: string; title: string; assigneeId?: string; reviewerId?: string; priority: string;
+      plannedEnd?: string; dependsOn: string[]; checklist: { id: string; label: string; isDone: boolean }[];
+    }>(`/api/tasks/${taskId}`);
+    setEditingTaskId(task.id);
+    setTitle(task.title);
+    setAssigneeId(task.assigneeId ?? "");
+    setReviewerId(task.reviewerId ?? "");
+    setPriority(task.priority);
+    setPlannedEnd(task.plannedEnd?.slice(0, 10) ?? "");
+    setDependsOn(task.dependsOn ?? []);
+    setChecklist(task.checklist ?? []);
+  };
+  const cancelEdit = () => {
+    setEditingTaskId(""); setTitle(""); setAssigneeId(""); setReviewerId("");
+    setPriority("normal"); setPlannedEnd(""); setDependsOn([]); setChecklist([]); setNewChecklistItem("");
+  };
+  const saveTask = async (event: FormEvent) => {
+    event.preventDefault();
+    await api.json(`/api/tasks/${editingTaskId}`, {
+      method: "PATCH", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title, assigneeId: assigneeId || null, priority, plannedEnd: plannedEnd || null, dependsOn }),
+    });
+    if (reviewerId) await api.json(`/api/tasks/${editingTaskId}/reviewer`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reviewerId }),
+    });
+    cancelEdit();
+    if (selected) await open(selected.id);
+  };
+  const addChecklist = async () => {
+    if (!editingTaskId || !newChecklistItem.trim()) return;
+    const item = await api.json<{ id: string; label: string; isDone: boolean }>(`/api/tasks/${editingTaskId}/checklist`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: newChecklistItem.trim() }),
+    });
+    setChecklist((items) => [...items, item]); setNewChecklistItem("");
   };
   return (
     <>
@@ -569,7 +631,7 @@ function Objects({
                   </h3>
                   {section.tasks.length ? (
                     section.tasks.map((task) => (
-                      <div className="task" key={task.id}>
+                      <button className="task task-button" key={task.id} type="button" onClick={() => canPlan && void editTask(task.id)}>
                         <div>
                           <strong>{task.title}</strong>
                           <small>
@@ -583,7 +645,7 @@ function Objects({
                         <span className={`task-status ${task.status}`}>
                           {task.status}
                         </span>
-                      </div>
+                      </button>
                     ))
                   ) : (
                     <p className="muted">{c.noTasks}</p>
@@ -592,8 +654,8 @@ function Objects({
               ))}
             </div>
             {canPlan && (
-              <form className="panel" onSubmit={createTask}>
-                <h3>{c.newTask}</h3>
+              <form className="panel" onSubmit={editingTaskId ? saveTask : createTask}>
+                <h3>{editingTaskId ? c.editTask : c.newTask}</h3>
                 <label>
                   {c.section}
                   <select
@@ -648,7 +710,21 @@ function Objects({
                     onChange={(e) => setPlannedEnd(e.target.value)}
                   />
                 </label>
-                <button>{c.createTask}</button>
+                <fieldset className="task-options">
+                  <legend>{c.dependencies}</legend>
+                  {allTasks.filter((task) => task.id !== editingTaskId).map((task) => <label className="check-row" key={task.id}>
+                    <input type="checkbox" checked={dependsOn.includes(task.id)} onChange={(event) => setDependsOn((ids) => event.target.checked ? [...ids, task.id] : ids.filter((id) => id !== task.id))}/>{c.dependencies}: {task.title}
+                  </label>)}
+                </fieldset>
+                {editingTaskId && <>
+                  <label>{c.reviewer}<select value={reviewerId} onChange={(event) => setReviewerId(event.target.value)}><option value="">{c.unassigned}</option>{reviewers.map((person) => <option key={person.id} value={person.id}>{person.fullName}</option>)}</select></label>
+                  <fieldset className="task-options"><legend>{c.checklist}</legend>
+                    {checklist.map((item) => <label className="check-row" key={item.id}><input type="checkbox" checked={item.isDone} onChange={async (event) => { const updated = await api.json<typeof item>(`/api/tasks/${editingTaskId}/checklist/${item.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ isDone: event.target.checked }) }); setChecklist((items) => items.map((value) => value.id === updated.id ? updated : value)); }}/>{item.label}</label>)}
+                    <div className="inline-form"><input aria-label={c.addChecklist} value={newChecklistItem} onChange={(event) => setNewChecklistItem(event.target.value)}/><button type="button" onClick={() => void addChecklist()}>{c.addChecklist}</button></div>
+                  </fieldset>
+                </>}
+                <button>{editingTaskId ? c.saveTask : c.createTask}</button>
+                {editingTaskId && <button type="button" className="secondary" onClick={cancelEdit}>{c.cancel}</button>}
               </form>
             )}
           </div>

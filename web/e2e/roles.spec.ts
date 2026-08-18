@@ -8,6 +8,7 @@ const object = { id: objectId, name: "ЖК Тестовый", address: "Ташк
 const document = { id: "document-1", title: "Рабочий проект", kind: "project", version: 1, fileUrl: "http://files.test/project.pdf", status: "review", createdBy: { fullName: "РП" }, approvals: [] };
 const act = { id: "act-1", number: "А-1", title: "Монолит", template: "completed", amount: 120000, status: "review", pdfUrl: "http://files.test/act.pdf", createdBy: { fullName: "РП" } };
 const gantt = { stages: [{ id: "stage-1", name: "Этап", sections: [{ id: "section-1", name: "Раздел", tasks: [{ id: "task-1", title: "Армирование", status: "in_progress", priority: "high", plannedStart: "2026-08-01", plannedEnd: "2026-08-20", progress: 50, riskLevel: "medium", dependsOn: [] }] }] }] };
+const objectDetail = { ...object, stages: gantt.stages };
 
 async function mockApi(page: Page) {
   await page.route("http://127.0.0.1:3000/**", async (route) => {
@@ -20,14 +21,16 @@ async function mockApi(page: Page) {
       return json({ accessToken: `access-${role}`, refreshToken: `refresh-${role}`, expiresIn: 900, user: { id: `user-${role}`, fullName: `Тест ${role}`, email: `${role}@test.local`, companyName: "CloudPlus", roles: [{ code: role, objectId: role === "admin" ? null : objectId }] } });
     }
     if (path === "/api/objects") return json([object]);
+    if (path === `/api/objects/${objectId}`) return json(objectDetail);
     if (path === `/api/objects/${objectId}/documents`) return json(request.method() === "GET" ? [document] : { id: "document-new" }, request.method() === "GET" ? 200 : 201);
     if (path === `/api/objects/${objectId}/acts`) return json(request.method() === "GET" ? [act] : { id: "act-new" }, request.method() === "GET" ? 200 : 201);
     if (path === `/api/objects/${objectId}/gantt`) return json(gantt);
     if (path === `/api/objects/${objectId}/photo-reports` || path === `/api/objects/${objectId}/defects`) return json([]);
     if (path === `/api/objects/${objectId}/defect-assignees`) return json([{ id: "user-foreman", fullName: "Тест foreman" }]);
-    if (path === "/api/tasks/task-1") return json({ ...gantt.stages[0].sections[0].tasks[0], closurePhotos: [] });
+    if (path === "/api/tasks/task-1") return json({ ...gantt.stages[0].sections[0].tasks[0], closurePhotos: [], checklist: [] });
     if (path === "/api/uploads") return json({ id: "upload-1", url: "http://127.0.0.1:3000/api/uploads/upload-1" }, 201);
-    if (path === "/api/planning/users" || path === "/api/admin/users" || path === "/api/admin/roles") return json([]);
+    if (path === "/api/planning/users") return json([{ id: "user-inspector", fullName: "Тест inspector", email: "inspector@test.local", isActive: true, roles: [{ objectId, role: { code: "inspector", name: "Технадзор" } }] }]);
+    if (path === "/api/admin/users" || path === "/api/admin/roles") return json([]);
     if (path.includes("/decision") || path.includes("/sign") || path.includes("/close")) return json({ ok: true });
     return json({});
   });
@@ -64,6 +67,21 @@ test("РП входит и может создавать документы и �
   await expect(page.getByRole("heading", { name: "Создать акт" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Согласовать" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Подписать акт" })).toHaveCount(0);
+});
+
+test("РП редактирует задачу, добавляет чек-лист, зависимость и проверяющего", async ({ page }) => {
+  await login(page, "pm");
+  await page.getByRole("button", { name: /ЖК Тестовый/ }).click();
+  await page.getByRole("button", { name: /Армирование/ }).click();
+  await expect(page.getByRole("heading", { name: "Редактировать задачу" })).toBeVisible();
+  const checklistRequest = page.waitForRequest((request) => request.url().endsWith("/api/tasks/task-1/checklist") && request.method() === "POST");
+  await page.getByLabel("Добавить пункт").fill("Проверить исполнительную схему");
+  await page.getByRole("button", { name: "Добавить пункт" }).click();
+  expect((await checklistRequest).postDataJSON()).toEqual({ label: "Проверить исполнительную схему" });
+  await page.getByLabel("Проверяющий").selectOption("user-inspector");
+  const reviewerRequest = page.waitForRequest((request) => request.url().endsWith("/api/tasks/task-1/reviewer"));
+  await page.getByRole("button", { name: "Сохранить задачу" }).click();
+  expect((await reviewerRequest).postDataJSON()).toEqual({ reviewerId: "user-inspector" });
 });
 
 test("прораб закрывает задачу с координатами браузера и фото", async ({ page, context }) => {

@@ -49,9 +49,10 @@ tasksRouter.patch('/:id', async (req, res, next) => {
     if (!companyId) return;
     if (!(await authorizeTask(res, req.params.id, ['admin', 'owner', 'pm']))) return res.status(403).json({ error: 'Insufficient permissions' });
     const input = updateTaskSchema.parse(req.body);
-    const task = await tasksService.updateTask(companyId, req.params.id, input);
-    if (!task) return res.status(404).json({ error: 'not_found' });
-    res.json(task);
+    const result = await tasksService.updateTask(companyId, req.params.id, input);
+    if (!result) return res.status(404).json({ error: 'not_found' });
+    if (result.kind === 'invalid_dependencies') return res.status(400).json({ error: 'invalid_dependencies' });
+    res.json(result.task);
   } catch (err) {
     if (handleZodError(err, res, next)) return;
   }
@@ -102,6 +103,8 @@ tasksRouter.post('/:id/close', async (req, res, next) => {
     if (!result) return res.status(404).json({ error: 'not_found' });
     if (result.kind === 'forbidden') return res.status(403).json({ error: 'Insufficient permissions' });
     if (result.kind === 'invalid_upload') return res.status(400).json({ error: 'Photo upload does not belong to this company and task' });
+    if (result.kind === 'checklist_incomplete') return res.status(409).json({ error: 'Complete every checklist item before closing the task' });
+    if (result.kind === 'dependencies_incomplete') return res.status(409).json({ error: 'Complete task dependencies before closing the task' });
     if (result.kind === 'conflict') return res.status(409).json({ error: 'Idempotency-Key was already used for another request' });
     res.setHeader('Idempotency-Replayed', String(result.replayed));
     res.json(result.task);

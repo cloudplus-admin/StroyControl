@@ -277,6 +277,13 @@ button:disabled {
   border-radius: 9px;
   background: #f5f7f4;
 }
+.task-button { width: 100%; text-align: left; border: 0; cursor: pointer; }
+.task-options { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.task-options legend { padding: 0 6px; font-weight: 700; }
+.check-row { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; }
+.check-row input { width: auto; }
+.inline-form { display: flex; gap: 8px; }
+.inline-form input { flex: 1; }
 .task div {
   display: grid;
   gap: 4px;

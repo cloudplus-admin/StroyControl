@@ -233,7 +233,7 @@ export function Acceptance({ session }: { session: UserSession }) {
   const [gantt, setGantt] = useState<Gantt | null>(null);
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [note, setNote] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [isClosing, setIsClosing] = useState(false);
   const canClose = session.user.roles.some((role) =>
@@ -256,12 +256,12 @@ export function Acceptance({ session }: { session: UserSession }) {
   const select = async (id: string) =>
     setTask(await api.json(`/api/tasks/${id}`));
   const close = async () => {
-    if (!task || !file) return;
+    if (!task || !files.length) return;
     setError("");
     setIsClosing(true);
     try {
       const coordinates = await getCurrentCoordinates();
-      const photo = await upload(file, task.id);
+      const photos = await Promise.all(files.map((file) => upload(file, task.id)));
       await api.json(`/api/tasks/${task.id}/close`, {
         method: "POST",
         headers: {
@@ -269,12 +269,12 @@ export function Acceptance({ session }: { session: UserSession }) {
           "idempotency-key": crypto.randomUUID(),
         },
         body: JSON.stringify({
-          photoUrls: [photo.url],
+          photoUrls: photos.map((photo) => photo.url),
           geoLat: coordinates.latitude,
           geoLng: coordinates.longitude,
         }),
       });
-      setFile(null);
+      setFiles([]);
       await select(task.id);
       await load();
     } finally {
@@ -334,12 +334,13 @@ export function Acceptance({ session }: { session: UserSession }) {
                   Фото
                   <input
                     type="file"
+                    multiple
                     accept="image/jpeg,image/png,image/webp"
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
                   />
                 </label>
                 <button
-                  disabled={!file || isClosing}
+                  disabled={!files.length || isClosing}
                   onClick={() => void close().catch((e) => setError(String(e)))}
                 >
                   {isClosing ? "Определяем геолокацию..." : "Закрыть задачу"}

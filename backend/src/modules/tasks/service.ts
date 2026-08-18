@@ -17,14 +17,30 @@ export async function getTaskObjectId(taskId: string): Promise<string | null> {
 export async function getTask(companyId: string, taskId: string) {
   return prisma.task.findFirst({
     where: scopedTaskWhere(companyId, taskId),
-    include: { checklist: true },
+    include: {
+      checklist: { orderBy: { id: 'asc' } },
+      assignee: { select: { id: true, fullName: true } },
+      reviewer: { select: { id: true, fullName: true } },
+    },
   });
 }
 
 export async function updateTask(companyId: string, taskId: string, input: Record<string, unknown>) {
-  const task = await prisma.task.findFirst({ where: scopedTaskWhere(companyId, taskId) });
+  const task = await prisma.task.findFirst({
+    where: scopedTaskWhere(companyId, taskId),
+    select: { id: true, workSection: { select: { stage: { select: { objectId: true } } } } },
+  });
   if (!task) return null;
-  return prisma.task.update({ where: { id: taskId }, data: input });
+  const dependsOn = input.dependsOn as string[] | undefined;
+  if (dependsOn) {
+    if (dependsOn.includes(taskId) || new Set(dependsOn).size !== dependsOn.length) return { kind: 'invalid_dependencies' as const };
+    const validCount = await prisma.task.count({
+      where: { id: { in: dependsOn }, workSection: { stage: { objectId: task.workSection.stage.objectId, object: { companyId } } } },
+    });
+    if (validCount !== dependsOn.length) return { kind: 'invalid_dependencies' as const };
+  }
+  const updated = await prisma.task.update({ where: { id: taskId }, data: input });
+  return { kind: 'ok' as const, task: updated };
 }
 
 export async function addChecklistItem(companyId: string, taskId: string, label: string) {
@@ -65,9 +81,18 @@ export async function closeTask(
 
   const task = await prisma.task.findFirst({
     where: scopedTaskWhere(companyId, taskId),
-    select: { id: true, title: true, reviewerId: true, workSection: { select: { stage: { select: { objectId: true } } } } },
+    select: {
+      id: true, title: true, reviewerId: true, dependsOn: true,
+      checklist: { select: { isDone: true } },
+      workSection: { select: { stage: { select: { objectId: true } } } },
+    },
   });
   if (!task) return null;
+  if (task.checklist.some((item) => !item.isDone)) return { kind: 'checklist_incomplete' as const };
+  if (task.dependsOn.length) {
+    const completedDependencies = await prisma.task.count({ where: { id: { in: task.dependsOn }, status: 'done' } });
+    if (completedDependencies !== task.dependsOn.length) return { kind: 'dependencies_incomplete' as const };
+  }
   if (options.actorId) {
     const uploadIds = input.photoUrls.map((photoUrl) => {
       try {
