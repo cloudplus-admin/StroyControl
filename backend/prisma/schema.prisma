@@ -43,6 +43,8 @@ model User {
   fullName     String   @map("full_name")
   passwordHash String   @map("password_hash")
   locale       String   @default("ru")
+  telegramChatId String? @map("telegram_chat_id")
+  pushToken      String? @map("push_token")
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   assignedTasks        Task[]
@@ -231,6 +233,7 @@ model Task {
   reviewer         User?       @relation("TaskReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
   reviewNote       String?     @map("review_note")
   escalatedAt      DateTime?   @map("escalated_at")
+  escalationLevel  Int         @default(0) @map("escalation_level")
   createdAt        DateTime    @default(now()) @map("created_at")
   checklist        TaskChecklistItem[]
   photoReports     PhotoReport[]
@@ -400,8 +403,13 @@ model Notification {
   entityType String?   @map("entity_type")
   entityId   String?   @map("entity_id")
   readAt     DateTime? @map("read_at")
+  deliveryStatus String @default("pending") @map("delivery_status")
+  deliveryAttempts Int @default(0) @map("delivery_attempts")
+  deliveredAt DateTime? @map("delivered_at")
+  deliveryError String? @map("delivery_error")
   createdAt  DateTime  @default(now()) @map("created_at")
 
   @@index([companyId, userId, readAt, createdAt])
+  @@index([deliveryStatus, createdAt])
   @@map("notifications")
 }

@@ -16,7 +16,7 @@ export const updateTaskSchema = z.object({
   dependsOn: z.array(z.string().uuid()).optional(),
   slaHours: z.number().int().positive().nullable().optional(),
   isRecurring: z.boolean().optional(),
-  recurrenceRule: z.string().max(100).nullable().optional(),
+  recurrenceRule: z.string().regex(/^(daily|weekdays|weekly:[0-6](,[0-6])*|monthly:([1-9]|1\d|2[0-8]))$/).nullable().optional(),
 });
 
 export const addChecklistItemSchema = z.object({

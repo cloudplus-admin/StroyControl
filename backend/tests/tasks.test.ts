@@ -179,6 +179,16 @@ describe('SLA sweep', () => {
     const sweepRes = await request(app).post('/api/tasks/sla-sweep').set('x-company-id', companyB.id);
     expect(sweepRes.body.escalated).toEqual([]);
   });
+
+  it('creates an in-app delivery job and records the escalation level', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const assignee = await prisma.user.create({ data: { companyId: company.id, email: 'sla@example.com', passwordHash: 'hash', fullName: 'Исполнитель' } });
+    const task = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id)
+      .send({ title: 'SLA уведомление', assigneeId: assignee.id, plannedEnd: new Date(Date.now() - 86400000).toISOString() });
+    const sweep = await request(app).post('/api/tasks/sla-sweep').set('x-company-id', company.id);
+    expect(sweep.body.escalated).toContainEqual(expect.objectContaining({ id: task.body.id, level: 1 }));
+    expect(await prisma.notification.findFirst({ where: { userId: assignee.id, entityId: task.body.id } })).toMatchObject({ deliveryStatus: 'pending' });
+  });
 });
 
 describe('Recurring tasks', () => {
@@ -198,5 +208,16 @@ describe('Recurring tasks', () => {
 
     const secondSweep = await request(app).post('/api/tasks/recurring-sweep').set('x-company-id', company.id);
     expect(secondSweep.body.created.length).toBe(0);
+  });
+
+  it('supports selected weekdays and skips non-matching weekdays', async () => {
+    const { company, sectionId } = await seedCompanyWithSection();
+    const template = await request(app).post(`/api/objects/sections/${sectionId}/tasks`).set('x-company-id', company.id).send({ title: 'Недельный обход' });
+    const today = new Date().getUTCDay();
+    await prisma.task.update({ where: { id: template.body.id }, data: { isRecurring: true, recurrenceRule: `weekly:${today}` } });
+    expect((await request(app).post('/api/tasks/recurring-sweep').set('x-company-id', company.id)).body.created).toHaveLength(1);
+    await prisma.task.update({ where: { id: template.body.id }, data: { recurrenceRule: `weekly:${(today + 1) % 7}` } });
+    await prisma.task.deleteMany({ where: { parentTaskId: template.body.id } });
+    expect((await request(app).post('/api/tasks/recurring-sweep').set('x-company-id', company.id)).body.created).toHaveLength(0);
   });
 });

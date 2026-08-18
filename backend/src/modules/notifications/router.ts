@@ -1,7 +1,16 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { prisma } from '../../db/prisma';
 
 export const notificationsRouter = Router();
+
+notificationsRouter.put('/channels', async (req, res) => {
+  const auth = res.locals.auth as { userId: string; companyId: string } | undefined;
+  if (!auth) return res.status(401).json({ error: 'Bearer access token is required' });
+  const input = z.object({ telegramChatId: z.string().trim().max(100).nullable().optional(), pushToken: z.string().trim().max(500).nullable().optional() }).parse(req.body);
+  const user = await prisma.user.update({ where: { id: auth.userId }, data: input, select: { telegramChatId: true, pushToken: true } });
+  return res.json(user);
+});
 
 notificationsRouter.get('/', async (req, res) => {
   const auth = res.locals.auth as { companyId: string; userId: string };

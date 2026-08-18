@@ -1,5 +1,6 @@
 import { prisma } from './db/prisma';
 import { runRecurringSweep, runSlaSweep } from './modules/tasks/service';
+import { deliverPendingNotifications } from './modules/notifications/delivery';
 
 async function main() {
   const companies = await prisma.company.findMany({ select: { id: true, name: true } });
@@ -12,7 +13,8 @@ async function main() {
     created += recurringTasks.length;
     console.log(JSON.stringify({ companyId: company.id, companyName: company.name, escalated: overdueTasks.length, created: recurringTasks.length }));
   }
-  console.log(JSON.stringify({ status: 'ok', companies: companies.length, escalated, created }));
+  const delivery = await deliverPendingNotifications();
+  console.log(JSON.stringify({ status: 'ok', companies: companies.length, escalated, created, delivery }));
 }
 
 main().catch((error) => {

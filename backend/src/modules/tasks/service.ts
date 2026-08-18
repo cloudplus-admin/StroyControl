@@ -1,6 +1,6 @@
 import { prisma } from '../../db/prisma';
 import { createHash } from 'crypto';
-import { notifyUsers } from '../notifications/service';
+import { notifyObjectRoles, notifyUsers } from '../notifications/service';
 
 function scopedTaskWhere(companyId: string, taskId: string) {
   return { id: taskId, workSection: { stage: { object: { companyId } } } };
@@ -202,18 +202,12 @@ export async function assignTaskReviewer(
   return { kind: 'ok' as const, task: updated };
 }
 
-/**
- * Помечает задачи компании просроченными, если plannedEnd (+ slaHours, если задан)
- * уже прошёл, а статус ещё не done/overdue. Реальная нотификация прорабу/ПМ
- * (Telegram/push) не реализована — модуль «Лента и коммуникации» ещё не построен;
- * это точка интеграции на будущее.
- */
 export async function runSlaSweep(companyId: string) {
   const now = new Date();
   const candidates = await prisma.task.findMany({
     where: {
       workSection: { stage: { object: { companyId } } },
-      status: { in: ['open', 'in_progress'] },
+      status: { in: ['open', 'in_progress', 'overdue'] },
       plannedEnd: { not: null },
     },
   });
@@ -223,41 +217,57 @@ export async function runSlaSweep(companyId: string) {
     const deadline = task.slaHours
       ? new Date(task.plannedEnd.getTime() + task.slaHours * 60 * 60 * 1000)
       : task.plannedEnd;
-    return deadline.getTime() < now.getTime();
+    if (deadline.getTime() >= now.getTime()) return false;
+    if (task.escalationLevel === 0) return true;
+    return task.escalationLevel === 1 && Boolean(task.escalatedAt && now.getTime() - task.escalatedAt.getTime() >= 24 * 60 * 60 * 1000);
   });
 
   if (toEscalate.length === 0) return [];
 
-  await prisma.task.updateMany({
-    where: { id: { in: toEscalate.map((t) => t.id) } },
-    data: { status: 'overdue', escalatedAt: now },
-  });
-
-  return toEscalate.map((t) => ({ id: t.id, title: t.title, assigneeId: t.assigneeId }));
+  const result = [];
+  for (const task of toEscalate) {
+    const objectId = await getTaskObjectId(task.id);
+    if (!objectId) continue;
+    const level = task.escalationLevel + 1;
+    await prisma.$transaction(async (tx) => {
+      await tx.task.update({ where: { id: task.id }, data: { status: 'overdue', escalatedAt: now, escalationLevel: level } });
+      await tx.feedEvent.create({ data: { objectId, kind: 'sla_escalation', body: `SLA: задача «${task.title}» просрочена, уровень ${level}` } });
+      if (task.assigneeId) await notifyUsers(tx, { companyId, userIds: [task.assigneeId], objectId, kind: 'sla_overdue', title: 'Задача просрочена', body: task.title, entityType: 'task', entityId: task.id });
+      await notifyObjectRoles(tx, { companyId, objectId, roleCodes: level === 1 ? ['foreman', 'pm'] : ['pm', 'admin', 'owner'], kind: 'sla_escalation', title: `SLA: эскалация уровня ${level}`, body: task.title, entityType: 'task', entityId: task.id, excludeUserId: task.assigneeId ?? undefined });
+    });
+    result.push({ id: task.id, title: task.title, assigneeId: task.assigneeId, level });
+  }
+  return result;
 }
 
-/**
- * Создаёт новый экземпляр повторяющейся задачи (только rule='daily'), если для
- * сегодняшнего дня экземпляр ещё не создавался. Упрощённая реализация —
- * покрывает пример из ТЗ («ежедневный обход, контроль ТБ»).
- */
+function recurrenceMatches(rule: string, date: Date) {
+  if (rule === 'daily') return true;
+  if (rule === 'weekdays') return date.getUTCDay() >= 1 && date.getUTCDay() <= 5;
+  const weekly = rule.match(/^weekly:([0-6](?:,[0-6])*)$/);
+  if (weekly) return weekly[1].split(',').map(Number).includes(date.getUTCDay());
+  const monthly = rule.match(/^monthly:([1-9]|1\d|2[0-8])$/);
+  return Boolean(monthly && Number(monthly[1]) === date.getUTCDate());
+}
+
 export async function runRecurringSweep(companyId: string) {
   const templates = await prisma.task.findMany({
     where: {
       workSection: { stage: { object: { companyId } } },
       isRecurring: true,
-      recurrenceRule: 'daily',
+      recurrenceRule: { not: null },
       parentTaskId: null,
     },
   });
 
   const created = [];
   const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
+  startOfToday.setUTCHours(0, 0, 0, 0);
+  const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
 
   for (const template of templates) {
+    if (!template.recurrenceRule || !recurrenceMatches(template.recurrenceRule, startOfToday)) continue;
     const existingToday = await prisma.task.findFirst({
-      where: { parentTaskId: template.id, createdAt: { gte: startOfToday } },
+      where: { parentTaskId: template.id, plannedStart: { gte: startOfToday, lt: startOfTomorrow } },
     });
     if (existingToday) continue;
 
@@ -277,6 +287,8 @@ export async function runRecurringSweep(companyId: string) {
         slaHours: template.slaHours,
       },
     });
+    const objectId = await getTaskObjectId(template.id);
+    if (template.assigneeId && objectId) await prisma.$transaction(async (tx) => notifyUsers(tx, { companyId, userIds: [template.assigneeId!], objectId, kind: 'recurring_task', title: 'Создана повторяющаяся задача', body: template.title, entityType: 'task', entityId: instance.id }));
     created.push(instance);
   }
 
