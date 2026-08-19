@@ -4,6 +4,13 @@ const objectId = "object-1";
 const roles = ["admin", "pm", "foreman", "inspector", "customer"] as const;
 type Role = (typeof roles)[number];
 
+test("интерактивный чек-лист приемки публикуется отдельной страницей", async ({ page }) => {
+  await page.goto("/testing-manual.html");
+  await expect(page).toHaveTitle("StroyControl - приемка MVP");
+  await expect(page.getByRole("heading", { name: "StroyControl - приемка MVP" })).toBeVisible();
+  await expect(page.locator('input[type="checkbox"]')).toHaveCount(19);
+});
+
 const object = { id: objectId, name: "ЖК Тестовый", address: "Ташкент", progress: 45, taskCount: 1, riskLevel: "medium" };
 const document = { id: "document-1", title: "Рабочий проект", kind: "project", version: 1, fileUrl: "http://files.test/project.pdf", status: "review", createdBy: { fullName: "РП" }, approvals: [] };
 const act = { id: "act-1", number: "А-1", title: "Монолит", template: "completed", amount: 120000, status: "review", pdfUrl: "http://files.test/act.pdf", createdBy: { fullName: "РП" } };

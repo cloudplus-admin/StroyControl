@@ -10,6 +10,7 @@
     "build:android:internal": "EXPO_PUBLIC_API_URL=https://stroycontrol-api.cloudplus.uz npm run prebuild:android && cd android && EXPO_PUBLIC_API_URL=https://stroycontrol-api.cloudplus.uz ./gradlew --no-daemon --max-workers=1 -Pkotlin.compiler.execution.strategy=in-process -PreactNativeArchitectures=arm64-v8a assembleInternalRelease",
     "build:android:release": "npm run prebuild:android && cd android && ./gradlew --no-daemon --max-workers=1 -Pkotlin.compiler.execution.strategy=in-process -PreactNativeArchitectures=arm64-v8a assembleRelease",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint App.tsx index.ts src --ext .ts,.tsx",
     "test": "vitest run"
   },
   "dependencies": {
@@ -40,6 +41,11 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^4.6.2",
     "typescript": "~6.0.3",
     "vitest": "^4.1.10"
   },
