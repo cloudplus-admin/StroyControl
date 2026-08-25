@@ -49,17 +49,25 @@ struct DashboardView: View {
     @ViewBuilder private var tasksView: some View {
         contentList(title: "Задачи") {
             ForEach(tasks) { task in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(task.title).font(.headline)
-                    Text("\(task.stage) - \(task.assignee)").font(.subheadline).foregroundStyle(.secondary)
-                    HStack {
-                        Label(task.due, systemImage: "calendar")
-                        Spacer()
-                        Text(statusTitle(task.status)).foregroundStyle(statusColor(task.status))
-                    }.font(.caption)
-                }.padding(.vertical, 4)
+                NavigationLink {
+                    TaskDetailView(task: task) { await load() }
+                } label: {
+                    taskRow(task)
+                }
             }
         }
+    }
+
+    private func taskRow(_ task: ProjectTask) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(task.title).font(.headline)
+            Text("\(task.stage) - \(task.assignee)").font(.subheadline).foregroundStyle(.secondary)
+            HStack {
+                Label(task.due, systemImage: "calendar")
+                Spacer()
+                Text(statusTitle(task.status)).foregroundStyle(statusColor(task.status))
+            }.font(.caption)
+        }.padding(.vertical, 4)
     }
 
     @ViewBuilder private var reportsView: some View {
@@ -154,12 +162,113 @@ private struct ProjectDetailView: View {
             }
             Section("Задачи") {
                 ForEach(project.tasks) { task in
-                    VStack(alignment: .leading) {
-                        Text(task.title)
-                        Text(task.assignee).font(.caption).foregroundStyle(.secondary)
+                    NavigationLink {
+                        TaskDetailView(task: task) { }
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(task.title)
+                            Text(task.assignee).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
         }.navigationTitle(project.name)
+    }
+}
+
+private struct TaskDetailView: View {
+    @Environment(SessionStore.self) private var session
+    let task: ProjectTask
+    let onChanged: () async -> Void
+
+    @State private var checklist: [ChecklistItem]
+    @State private var updatingItemIds: Set<String> = []
+    @State private var error = ""
+
+    init(task: ProjectTask, onChanged: @escaping () async -> Void) {
+        self.task = task
+        self.onChanged = onChanged
+        _checklist = State(initialValue: task.checklist)
+    }
+
+    var body: some View {
+        List {
+            Section("Задача") {
+                LabeledContent("Этап", value: task.stage)
+                LabeledContent("Ответственный", value: task.assignee)
+                LabeledContent("Срок", value: task.due)
+                LabeledContent("Приоритет", value: priorityTitle(task.priority))
+                LabeledContent("Статус", value: statusTitle(task.status))
+                if let description = task.description, !description.isEmpty {
+                    Text(description)
+                }
+            }
+
+            Section("Чек-лист") {
+                if checklist.isEmpty {
+                    Text("Пунктов пока нет").foregroundStyle(.secondary)
+                }
+                ForEach(checklist) { item in
+                    Button {
+                        Task { await toggle(item) }
+                    } label: {
+                        HStack {
+                            Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(item.done ? .green : .secondary)
+                            Text(item.text).foregroundStyle(.primary)
+                            Spacer()
+                            if updatingItemIds.contains(item.id) { ProgressView() }
+                        }
+                    }
+                    .disabled(updatingItemIds.contains(item.id) || task.status == "done")
+                }
+            }
+
+            if !error.isEmpty {
+                Section { Text(error).foregroundStyle(.red) }
+            }
+        }
+        .navigationTitle(task.title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func toggle(_ item: ChecklistItem) async {
+        guard let current = session.session else { return }
+        updatingItemIds.insert(item.id)
+        error = ""
+        defer { updatingItemIds.remove(item.id) }
+        do {
+            let result = try await APIClient.shared.setChecklistItem(
+                taskId: task.id,
+                itemId: item.id,
+                isDone: !item.done,
+                session: current
+            )
+            if let index = checklist.firstIndex(where: { $0.id == result.id }) {
+                checklist[index] = ChecklistItem(id: item.id, text: item.text, done: result.isDone)
+            }
+            await onChanged()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func statusTitle(_ value: String) -> String {
+        switch value {
+        case "open": "Открыта"
+        case "in_progress": "В работе"
+        case "review": "На проверке"
+        case "done": "Готово"
+        default: value
+        }
+    }
+
+    private func priorityTitle(_ value: String) -> String {
+        switch value {
+        case "high": "Высокий"
+        case "medium": "Средний"
+        case "low": "Низкий"
+        default: value
+        }
     }
 }

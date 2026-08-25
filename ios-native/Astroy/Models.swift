@@ -64,6 +64,11 @@ struct ChecklistItem: Codable, Hashable, Identifiable {
     let done: Bool
 }
 
+struct ChecklistMutationResponse: Codable {
+    let id: String
+    let isDone: Bool
+}
+
 struct ProjectDocument: Codable, Hashable, Identifiable {
     let id: String
     let objectId: String

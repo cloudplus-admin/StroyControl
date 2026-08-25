@@ -14,4 +14,11 @@ final class SessionDecodingTests: XCTestCase {
         XCTAssertEqual(response.objects.first?.openTaskCount, 1)
         XCTAssertEqual(response.objects.first?.tasks.first?.title, "Колонны")
     }
+
+    func testDecodesChecklistMutationResponse() throws {
+        let json = #"{"id":"c1","taskId":"t1","label":"Проверить каски","isDone":true}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(ChecklistMutationResponse.self, from: json)
+        XCTAssertEqual(response.id, "c1")
+        XCTAssertTrue(response.isDone)
+    }
 }

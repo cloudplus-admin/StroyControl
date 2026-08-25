@@ -1,11 +1,12 @@
 import Foundation
 
 enum APIError: LocalizedError {
-    case invalidCredentials, serverUnavailable, invalidResponse
+    case invalidCredentials, forbidden, serverUnavailable, invalidResponse
 
     var errorDescription: String? {
         switch self {
         case .invalidCredentials: "Неверный логин или пароль"
+        case .forbidden: "Недостаточно прав для изменения чек-листа"
         case .serverUnavailable: "Сервер временно недоступен"
         case .invalidResponse: "Получен некорректный ответ сервера"
         }
@@ -43,6 +44,26 @@ actor APIClient {
         guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
         do {
             return try decoder.decode(BootstrapResponse.self, from: data)
+        } catch {
+            throw APIError.invalidResponse
+        }
+    }
+
+    func setChecklistItem(taskId: String, itemId: String, isDone: Bool, session: Session) async throws -> ChecklistMutationResponse {
+        var request = authorizedRequest(
+            path: "/api/tasks/\(taskId)/checklist/\(itemId)",
+            session: session
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(["isDone": isDone])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.invalidCredentials }
+        if http.statusCode == 403 { throw APIError.forbidden }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
+        do {
+            return try decoder.decode(ChecklistMutationResponse.self, from: data)
         } catch {
             throw APIError.invalidResponse
         }
