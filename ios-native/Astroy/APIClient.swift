@@ -36,6 +36,18 @@ actor APIClient {
         _ = try? await URLSession.shared.data(for: request)
     }
 
+    func bootstrap(session: Session) async throws -> BootstrapResponse {
+        let request = authorizedRequest(path: "/api/mobile/bootstrap", session: session)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
+        do {
+            return try decoder.decode(BootstrapResponse.self, from: data)
+        } catch {
+            throw APIError.invalidResponse
+        }
+    }
+
     private func authorizedRequest(path: String, session: Session) -> URLRequest {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
