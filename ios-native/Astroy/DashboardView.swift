@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct DashboardView: View {
     @Environment(SessionStore.self) private var session
@@ -184,6 +185,13 @@ private struct TaskDetailView: View {
     @State private var checklist: [ChecklistItem]
     @State private var updatingItemIds: Set<String> = []
     @State private var error = ""
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var photoData: Data?
+    @State private var showCamera = false
+    @State private var isClosing = false
+    @State private var isClosed = false
+    @State private var closeOperationId: String?
+    @StateObject private var locationProvider = TaskLocationProvider()
 
     init(task: ProjectTask, onChanged: @escaping () async -> Void) {
         self.task = task
@@ -224,12 +232,88 @@ private struct TaskDetailView: View {
                 }
             }
 
+            if task.status != "done" && !isClosed {
+                Section("Закрытие задачи") {
+                    if let photoData, let image = UIImage(data: photoData) {
+                        Image(uiImage: image)
+                            .resizable().scaledToFit().frame(maxHeight: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Label(photoData == nil ? "Выбрать фото" : "Заменить фото", systemImage: "photo")
+                    }
+                    Button { showCamera = true } label: { Label("Сделать фото", systemImage: "camera") }
+                        .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                    Button { Task { await closeTask() } } label: {
+                        HStack {
+                            Text("Закрыть задачу")
+                            Spacer()
+                            if isClosing { ProgressView() }
+                        }
+                    }
+                    .disabled(photoData == nil || isClosing)
+                }
+            } else {
+                Section { Label("Задача завершена", systemImage: "checkmark.seal.fill").foregroundStyle(.green) }
+            }
+
             if !error.isEmpty {
                 Section { Text(error).foregroundStyle(.red) }
             }
         }
         .navigationTitle(task.title)
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else { return }
+            Task {
+                do {
+                    guard let source = try await item.loadTransferable(type: Data.self),
+                          let image = UIImage(data: source),
+                          let jpeg = image.jpegData(compressionQuality: 0.82) else {
+                        self.error = "Не удалось открыть выбранное фото"
+                        return
+                    }
+                    photoData = jpeg
+                    closeOperationId = nil
+                }
+                catch { self.error = "Не удалось открыть выбранное фото" }
+            }
+        }
+        .sheet(isPresented: $showCamera) {
+            CameraPicker { image in
+                photoData = image.jpegData(compressionQuality: 0.82)
+                closeOperationId = nil
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    private func closeTask() async {
+        guard let current = session.session, let photoData else { return }
+        isClosing = true
+        error = ""
+        defer { isClosing = false }
+        do {
+            let location = try await locationProvider.currentLocation()
+            let operationId = closeOperationId ?? UUID().uuidString
+            closeOperationId = operationId
+            let upload = try await APIClient.shared.uploadTaskPhoto(
+                taskId: task.id, data: photoData, session: current, idempotencyKey: "ios-close-photo-\(operationId)"
+            )
+            try await APIClient.shared.closeTask(
+                taskId: task.id,
+                photoURL: upload.url,
+                latitude: location.coordinate.latitude,
+                longitude: location.coordinate.longitude,
+                session: current,
+                idempotencyKey: "ios-close-task-\(operationId)"
+            )
+            isClosed = true
+            closeOperationId = nil
+            await onChanged()
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     private func toggle(_ item: ChecklistItem) async {

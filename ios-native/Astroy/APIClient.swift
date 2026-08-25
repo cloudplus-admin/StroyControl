@@ -1,12 +1,13 @@
 import Foundation
 
 enum APIError: LocalizedError {
-    case invalidCredentials, forbidden, serverUnavailable, invalidResponse
+    case invalidCredentials, forbidden, conflict(String), serverUnavailable, invalidResponse
 
     var errorDescription: String? {
         switch self {
         case .invalidCredentials: "Неверный логин или пароль"
-        case .forbidden: "Недостаточно прав для изменения чек-листа"
+        case .forbidden: "Недостаточно прав для выполнения действия"
+        case .conflict(let message): message
         case .serverUnavailable: "Сервер временно недоступен"
         case .invalidResponse: "Получен некорректный ответ сервера"
         }
@@ -67,6 +68,44 @@ actor APIClient {
         } catch {
             throw APIError.invalidResponse
         }
+    }
+
+    func uploadTaskPhoto(taskId: String, data: Data, session: Session, idempotencyKey: String) async throws -> UploadResponse {
+        var request = authorizedRequest(path: "/api/uploads", session: session)
+        request.httpMethod = "POST"
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("task-photo.jpg", forHTTPHeaderField: "x-file-name")
+        request.setValue(taskId, forHTTPHeaderField: "x-task-id")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "idempotency-key")
+        request.httpBody = data
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+        do { return try decoder.decode(UploadResponse.self, from: responseData) }
+        catch { throw APIError.invalidResponse }
+    }
+
+    func closeTask(taskId: String, photoURL: String, latitude: Double, longitude: Double, session: Session, idempotencyKey: String) async throws {
+        var request = authorizedRequest(path: "/api/tasks/\(taskId)/close", session: session)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "idempotency-key")
+        request.httpBody = try encoder.encode(CloseTaskRequest(photoUrls: [photoURL], geoLat: latitude, geoLng: longitude))
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.invalidCredentials }
+        if http.statusCode == 403 { throw APIError.forbidden }
+        if http.statusCode == 409 {
+            let message = (try? decoder.decode(ServerErrorResponse.self, from: data).error) ?? "Задачу пока нельзя закрыть"
+            throw APIError.conflict(message == "Complete every checklist item before closing the task" ? "Сначала отметь все пункты чек-листа" : "Сначала заверши связанные задачи")
+        }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
+    }
+
+    private func validate(_ response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.invalidCredentials }
+        if http.statusCode == 403 { throw APIError.forbidden }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
     }
 
     private func authorizedRequest(path: String, session: Session) -> URLRequest {

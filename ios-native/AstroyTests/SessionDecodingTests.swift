@@ -21,4 +21,16 @@ final class SessionDecodingTests: XCTestCase {
         XCTAssertEqual(response.id, "c1")
         XCTAssertTrue(response.isDone)
     }
+
+    func testEncodesTaskClosureContract() throws {
+        let request = CloseTaskRequest(
+            photoUrls: ["https://stroycontrol-api.cloudplus.uz/api/uploads/photo-1"],
+            geoLat: 41.3111,
+            geoLng: 69.2797
+        )
+        let encoded = try JSONEncoder().encode(request)
+        let decoded = try JSONDecoder().decode(CloseTaskRequest.self, from: encoded)
+        XCTAssertEqual(decoded, request)
+        XCTAssertEqual(decoded.photoUrls.count, 1)
+    }
 }

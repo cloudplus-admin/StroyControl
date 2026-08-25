@@ -69,6 +69,23 @@ struct ChecklistMutationResponse: Codable {
     let isDone: Bool
 }
 
+struct UploadResponse: Codable {
+    let id: String
+    let url: String
+    let mimeType: String
+    let sizeBytes: Int
+}
+
+struct CloseTaskRequest: Codable, Equatable {
+    let photoUrls: [String]
+    let geoLat: Double
+    let geoLng: Double
+}
+
+struct ServerErrorResponse: Codable {
+    let error: String
+}
+
 struct ProjectDocument: Codable, Hashable, Identifiable {
     let id: String
     let objectId: String
