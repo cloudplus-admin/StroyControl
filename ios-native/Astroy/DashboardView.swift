@@ -5,16 +5,16 @@ private enum AppTab: String, CaseIterable, Identifiable {
     case home, objects, tasks, quality, cameras, feed, supply, profile
 
     var id: String { rawValue }
-    var title: String {
+    func title(_ language: LanguageStore) -> String {
         switch self {
-        case .home: "Сводка"
-        case .objects: "Объекты"
-        case .tasks: "Задачи"
-        case .quality: "Контроль"
-        case .cameras: "Камеры"
-        case .feed: "Лента"
-        case .supply: "Учет"
-        case .profile: "Профиль"
+        case .home: language.text("Сводка")
+        case .objects: language.text("Объекты")
+        case .tasks: language.text("Задачи")
+        case .quality: language.text("Контроль")
+        case .cameras: language.text("Камеры")
+        case .feed: language.text("Лента")
+        case .supply: language.text("Учет")
+        case .profile: language.text("Профиль")
         }
     }
     var icon: String {
@@ -33,6 +33,7 @@ private enum AppTab: String, CaseIterable, Identifiable {
 
 struct DashboardView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(LanguageStore.self) private var language
     @State private var projects: [Project] = []
     @State private var reviewers: [Reviewer] = []
     @State private var isLoading = true
@@ -105,7 +106,7 @@ struct DashboardView: View {
             .scrollBounceBehavior(.always)
             .scrollIndicators(.visible)
             .refreshable { await load() }
-            .navigationTitle(selectedTab.title)
+            .navigationTitle(selectedTab.title(language))
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomNavigation }
         }
         .task { await load() }
@@ -158,7 +159,7 @@ struct DashboardView: View {
                     } label: {
                         VStack(spacing: 3) {
                             Image(systemName: tab.icon).font(.system(size: 18, weight: .semibold))
-                            Text(tab.title).font(.caption2).lineLimit(1)
+                            Text(tab.title(language)).font(.caption2).lineLimit(1)
                         }
                         .foregroundStyle(selectedTab == tab ? Color.accentColor : Color.secondary)
                         .frame(minWidth: 64)
@@ -176,9 +177,9 @@ struct DashboardView: View {
             Text("StroyControl").font(.title.bold())
             Text(session.session?.user?.fullName ?? "").foregroundStyle(.secondary)
             HStack(spacing: 10) {
-                metric(title: "Объекты", value: projects.count, color: .blue)
-                metric(title: "Открытые", value: tasks.filter { $0.status != "done" }.count, color: .orange)
-                metric(title: "Дефекты", value: defects.filter { $0.status != "closed" }.count, color: .red)
+                metric(title: language.text("Объекты"), value: projects.count, color: .blue)
+                metric(title: language.text("Открытые"), value: tasks.filter { $0.status != "done" }.count, color: .orange)
+                metric(title: language.text("Дефекты"), value: defects.filter { $0.status != "closed" }.count, color: .red)
             }
             Text("Ход строительства").font(.headline)
             ForEach(projects.prefix(4)) { project in projectCard(project) }
@@ -272,7 +273,7 @@ struct DashboardView: View {
             Text("Фото и технадзор").font(.title2.bold())
             ForEach(reports) { report in
                 VStack(alignment: .leading, spacing: 10) {
-                    LabeledContent(report.point ?? "Фотоотчет", value: statusTitle(report.status ?? ""))
+                    LabeledContent(report.point ?? language.text("Фотоотчет"), value: statusTitle(report.status ?? ""))
                     if !report.imageURLs.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
@@ -330,6 +331,13 @@ struct DashboardView: View {
 
     private var profileView: some View {
         VStack(alignment: .leading, spacing: 14) {
+            Picker("Язык", selection: Bindable(language).selected) {
+                ForEach(AppLanguage.allCases) { item in
+                    Text(item.title).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .cardStyle()
             LabeledContent("Имя", value: session.session?.user?.fullName ?? "-").cardStyle()
             LabeledContent("Компания", value: session.session?.user?.companyName ?? "-").cardStyle()
             LabeledContent("Роль", value: roleCode).cardStyle()
@@ -387,22 +395,22 @@ struct DashboardView: View {
 
     private func statusTitle(_ value: String) -> String {
         switch value {
-        case "open": "Открыта"
-        case "in_progress": "В работе"
-        case "review": "На проверке"
-        case "done", "accepted", "approved": "Готово"
-        case "rejected": "Отклонено"
+        case "open": language.text("Открыта")
+        case "in_progress": language.text("В работе")
+        case "review": language.text("На проверке")
+        case "done", "accepted", "approved": language.text("Готово")
+        case "rejected": language.text("Отклонено")
         default: value.isEmpty ? "-" : value
         }
     }
 
     private func taskFilterTitle(_ value: String) -> String {
         switch value {
-        case "open": "Открытые"
-        case "in_progress": "В работе"
-        case "review": "На проверке"
-        case "done": "Готово"
-        default: "Все"
+        case "open": language.text("Открытые")
+        case "in_progress": language.text("В работе")
+        case "review": language.text("На проверке")
+        case "done": language.text("Готово")
+        default: language.text("Все")
         }
     }
 
@@ -657,6 +665,7 @@ private struct ProjectDetailView: View {
 
 private struct TaskDetailView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(LanguageStore.self) private var language
     let task: ProjectTask
     let onChanged: () async -> Void
     let reviewers: [Reviewer]
@@ -730,7 +739,7 @@ private struct TaskDetailView: View {
 
             if canManage && !reviewers.isEmpty {
                 Section("Технадзор") {
-                    Text(task.reviewerName ?? "Проверяющий не назначен").foregroundStyle(.secondary)
+                    Text(task.reviewerName ?? language.text("Проверяющий не назначен")).foregroundStyle(.secondary)
                     Menu("Назначить проверяющего") {
                         ForEach(reviewers.filter { $0.objectIds.isEmpty || $0.objectIds.contains(task.objectId) }) { reviewer in
                             Button(reviewer.name) { Task { await assign(reviewer) } }
@@ -758,7 +767,7 @@ private struct TaskDetailView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                     PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                        Label(photoData == nil ? "Выбрать фото" : "Заменить фото", systemImage: "photo")
+                        Label(language.text(photoData == nil ? "Выбрать фото" : "Заменить фото"), systemImage: "photo")
                     }
                     Button { showCamera = true } label: { Label("Сделать фото", systemImage: "camera") }
                         .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
@@ -789,13 +798,13 @@ private struct TaskDetailView: View {
                     guard let source = try await item.loadTransferable(type: Data.self),
                           let image = UIImage(data: source),
                           let jpeg = image.jpegData(compressionQuality: 0.82) else {
-                        self.error = "Не удалось открыть выбранное фото"
+                        self.error = language.text("Не удалось открыть выбранное фото")
                         return
                     }
                     photoData = jpeg
                     closeOperationId = nil
                 }
-                catch { self.error = "Не удалось открыть выбранное фото" }
+                catch { self.error = language.text("Не удалось открыть выбранное фото") }
             }
         }
         .sheet(isPresented: $showCamera) {
@@ -905,7 +914,7 @@ private struct TaskDetailView: View {
                 try await OfflineQueue.shared.enqueue(pending)
                 isClosed = true
                 closeOperationId = nil
-                self.error = "Нет сети. Закрытие задачи сохранено и отправится автоматически"
+                self.error = language.text("Нет сети. Закрытие задачи сохранено и отправится автоматически")
                 await onChanged()
                 return
             } catch let urlError as URLError {
@@ -913,8 +922,8 @@ private struct TaskDetailView: View {
                 isClosed = true
                 closeOperationId = nil
                 self.error = urlError.code == .notConnectedToInternet
-                    ? "Нет сети. Закрытие задачи сохранено и отправится автоматически"
-                    : "Связь прервалась. Закрытие задачи сохранено и отправится автоматически"
+                    ? language.text("Нет сети. Закрытие задачи сохранено и отправится автоматически")
+                    : language.text("Связь прервалась. Закрытие задачи сохранено и отправится автоматически")
                 await onChanged()
                 return
             }
@@ -949,20 +958,20 @@ private struct TaskDetailView: View {
 
     private func statusTitle(_ value: String) -> String {
         switch value {
-        case "open": "Открыта"
-        case "in_progress": "В работе"
-        case "review": "На проверке"
-        case "done": "Готово"
+        case "open": language.text("Открыта")
+        case "in_progress": language.text("В работе")
+        case "review": language.text("На проверке")
+        case "done": language.text("Готово")
         default: value
         }
     }
 
     private func priorityTitle(_ value: String) -> String {
         switch value {
-        case "high": "Высокий"
-        case "medium": "Средний"
-        case "normal": "Средний"
-        case "low": "Низкий"
+        case "high": language.text("Высокий")
+        case "medium": language.text("Средний")
+        case "normal": language.text("Средний")
+        case "low": language.text("Низкий")
         default: value
         }
     }

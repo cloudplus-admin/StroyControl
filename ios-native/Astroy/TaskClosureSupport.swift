@@ -7,8 +7,8 @@ enum LocationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .denied: "Разреши доступ к геолокации в настройках iPhone"
-        case .unavailable: "Не удалось определить геолокацию. Попробуй еще раз на открытом месте"
+        case .denied: L10n.text("Разреши доступ к геолокации в настройках iPhone")
+        case .unavailable: L10n.text("Не удалось определить геолокацию. Попробуй еще раз на открытом месте")
         }
     }
 }

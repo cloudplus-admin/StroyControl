@@ -5,11 +5,11 @@ enum APIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidCredentials: "Неверный логин или пароль"
-        case .forbidden: "Недостаточно прав для выполнения действия"
+        case .invalidCredentials: L10n.text("Неверный логин или пароль")
+        case .forbidden: L10n.text("Недостаточно прав для выполнения действия")
         case .conflict(let message): message
-        case .serverUnavailable: "Сервер временно недоступен"
-        case .invalidResponse: "Получен некорректный ответ сервера"
+        case .serverUnavailable: L10n.text("Сервер временно недоступен")
+        case .invalidResponse: L10n.text("Получен некорректный ответ сервера")
         }
     }
 }
@@ -196,7 +196,9 @@ actor APIClient {
         if http.statusCode == 403 { throw APIError.forbidden }
         if http.statusCode == 409 {
             let message = (try? decoder.decode(ServerErrorResponse.self, from: data).error) ?? "Задачу пока нельзя закрыть"
-            throw APIError.conflict(message == "Complete every checklist item before closing the task" ? "Сначала отметь все пункты чек-листа" : "Сначала заверши связанные задачи")
+            throw APIError.conflict(message == "Complete every checklist item before closing the task"
+                ? L10n.text("Сначала отметь все пункты чек-листа")
+                : L10n.text("Сначала заверши связанные задачи"))
         }
         guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
     }

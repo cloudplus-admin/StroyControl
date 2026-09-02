@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LoginView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(LanguageStore.self) private var language
     @State private var email = ""
     @State private var password = ""
     @State private var error = ""
@@ -15,7 +16,7 @@ struct LoginView: View {
                     SecureField("Пароль", text: $password)
                 }
                 if !error.isEmpty { Text(error).foregroundStyle(.red) }
-                Button(isLoading ? "Входим..." : "Войти") { Task { await login() } }
+                Button(language.text(isLoading ? "Входим..." : "Войти")) { Task { await login() } }
                     .disabled(isLoading || email.isEmpty || password.isEmpty)
             }
             .scrollBounceBehavior(.always)
