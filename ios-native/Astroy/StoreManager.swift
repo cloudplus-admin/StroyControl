@@ -9,7 +9,7 @@ final class StoreManager {
     private(set) var activeProductIDs: Set<String> = []
     private(set) var isLoading = false
     private(set) var message = ""
-    private var updatesTask: Task<Void, Never>?
+    nonisolated(unsafe) private var updatesTask: Task<Void, Never>?
 
     static let productIDs = [
         "uz.cloudplus.stroycontrol.one_time_job",
