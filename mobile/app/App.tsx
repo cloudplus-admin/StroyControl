@@ -36,6 +36,7 @@ import {
 } from "expo-audio";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { StatusBar } from "expo-status-bar";
+import { useIAP } from "expo-iap";
 import {
   addCrewShift,
   advanceSafetyViolation,
@@ -81,6 +82,13 @@ import {
 } from "./src/navigation";
 
 type SignaturePoint = { x: number; y: number };
+
+const billingPlans = [
+  { id: "uz.cloudplus.stroycontrol.one_time_job", type: "in-app" as const, ru: "Разовая работа", uz: "Bir martalik ish", en: "One-time job" },
+  { id: "uz.cloudplus.stroycontrol.renovation_monthly", type: "subs" as const, ru: "Ремонтные работы 100-300 кв. м", uz: "100-300 kv. m ta'mirlash ishlari", en: "Renovation work, 100-300 sq. m" },
+  { id: "uz.cloudplus.stroycontrol.houses_monthly", type: "subs" as const, ru: "Строительство домов", uz: "Uylar qurilishi", en: "House construction" },
+  { id: "uz.cloudplus.stroycontrol.commercial_monthly", type: "subs" as const, ru: "Строительство многоэтажек и бизнес-центров", uz: "Ko'p qavatli uylar va biznes markazlari qurilishi", en: "Construction of apartment buildings and business centers" },
+];
 
 const SignaturePad = memo(function SignaturePad({ value, hint, onChange }: { value: SignaturePoint[]; hint: string; onChange: (points: SignaturePoint[]) => void }) {
   const [points, setPoints] = useState<SignaturePoint[]>(value);
@@ -3216,6 +3224,89 @@ function ProfileScreen({
   logout: () => Promise<void>;
 }) {
   const logoutLabel = lang === "uz" ? "Hisobdan chiqish" : lang === "en" ? "Sign out" : "Выйти из аккаунта";
+  const copy = lang === "uz"
+    ? { plans: "Tariflar", hint: "Tarifni tanlang va Google Play orqali to'lang.", pay: "Google Play orqali to'lash", restore: "Xaridlarni tiklash", active: "Faol", unavailable: "Tarif Google Play'da hali sozlanmagan.", success: "To'lov muvaffaqiyatli amalga oshirildi", restored: "Xaridlar tiklandi", failed: "To'lovni yakunlab bo'lmadi" }
+    : lang === "en"
+      ? { plans: "Plans", hint: "Choose a plan and pay through Google Play.", pay: "Pay through Google Play", restore: "Restore purchases", active: "Active", unavailable: "This plan is not configured in Google Play yet.", success: "Payment completed successfully", restored: "Purchases restored", failed: "Payment could not be completed" }
+      : { plans: "Тарифы", hint: "Выбери тариф и оплати его через Google Play.", pay: "Оплатить через Google Play", restore: "Восстановить покупки", active: "Активен", unavailable: "Тариф еще не настроен в Google Play.", success: "Оплата прошла успешно", restored: "Покупки восстановлены", failed: "Не удалось завершить оплату" };
+  const [selectedPlanId, setSelectedPlanId] = useState(billingPlans[0]!.id);
+  const [billingBusy, setBillingBusy] = useState(false);
+  const [billingMessage, setBillingMessage] = useState("");
+  const {
+    connected,
+    products,
+    subscriptions,
+    availablePurchases,
+    activeSubscriptions,
+    fetchProducts,
+    requestPurchase,
+    finishTransaction,
+    restorePurchases,
+    getAvailablePurchases,
+    getActiveSubscriptions,
+  } = useIAP();
+
+  useEffect(() => {
+    if (!connected) return;
+    void Promise.all([
+      fetchProducts({ skus: billingPlans.filter((plan) => plan.type === "in-app").map((plan) => plan.id), type: "in-app" }),
+      fetchProducts({ skus: billingPlans.filter((plan) => plan.type === "subs").map((plan) => plan.id), type: "subs" }),
+      getAvailablePurchases(),
+      getActiveSubscriptions(billingPlans.filter((plan) => plan.type === "subs").map((plan) => plan.id)),
+    ]).catch(() => setBillingMessage(copy.unavailable));
+  }, [connected, fetchProducts, getActiveSubscriptions, getAvailablePurchases]);
+
+  const activeProductIds = new Set([
+    ...availablePurchases.map((purchase) => purchase.productId),
+    ...activeSubscriptions.filter((subscription) => subscription.isActive).map((subscription) => subscription.productId),
+  ]);
+  const selectedPlan = billingPlans.find((plan) => plan.id === selectedPlanId) ?? billingPlans[0]!;
+  const storeProduct = [...products, ...subscriptions].find((product) => product.id === selectedPlan.id);
+
+  const buyPlan = async () => {
+    if (!storeProduct) { setBillingMessage(copy.unavailable); return; }
+    setBillingBusy(true);
+    setBillingMessage("");
+    try {
+      const request = selectedPlan.type === "in-app"
+        ? { request: { google: { skus: [selectedPlan.id] } }, type: "in-app" as const }
+        : {
+            request: {
+              google: {
+                skus: [selectedPlan.id],
+                subscriptionOffers: storeProduct.type === "subs" && storeProduct.platform === "android" && storeProduct.subscriptionOffers[0]?.offerTokenAndroid
+                  ? [{ sku: selectedPlan.id, offerToken: storeProduct.subscriptionOffers[0].offerTokenAndroid }]
+                  : undefined,
+              },
+            },
+            type: "subs" as const,
+          };
+      const result = await requestPurchase(request);
+      const purchases = Array.isArray(result) ? result : result ? [result] : [];
+      for (const purchase of purchases) {
+        await finishTransaction({ purchase, isConsumable: selectedPlan.type === "in-app" });
+      }
+      if (purchases.length > 0) setBillingMessage(copy.success);
+    } catch {
+      setBillingMessage(copy.failed);
+    } finally {
+      setBillingBusy(false);
+    }
+  };
+
+  const restore = async () => {
+    setBillingBusy(true);
+    try {
+      await restorePurchases();
+      await getActiveSubscriptions(billingPlans.filter((plan) => plan.type === "subs").map((plan) => plan.id));
+      setBillingMessage(copy.restored);
+    } catch {
+      setBillingMessage(copy.failed);
+    } finally {
+      setBillingBusy(false);
+    }
+  };
+
   return (
     <View>
       <Text style={s.h1}>{t.profile}</Text>
@@ -3239,6 +3330,28 @@ function ProfileScreen({
             </Pressable>
           ))}
         </View>
+      </View>
+      <View style={s.card}>
+        <Text style={s.cardTitle}>{copy.plans}</Text>
+        <Text style={s.muted}>{copy.hint}</Text>
+        {billingPlans.map((plan) => {
+          const product = [...products, ...subscriptions].find((item) => item.id === plan.id);
+          const active = activeProductIds.has(plan.id);
+          return (
+            <Pressable key={plan.id} style={s.checkRow} onPress={() => setSelectedPlanId(plan.id)}>
+              <Text style={selectedPlanId === plan.id ? s.checkDone : s.checkBox}>{selectedPlanId === plan.id ? "✓" : "○"}</Text>
+              <Text style={s.flex}>{plan[lang]}</Text>
+              <Text style={active ? s.status : s.muted}>{active ? copy.active : product?.displayPrice ?? "-"}</Text>
+            </Pressable>
+          );
+        })}
+        <Pressable style={s.primary} disabled={billingBusy || activeProductIds.has(selectedPlan.id)} onPress={() => void buyPlan()}>
+          <Text style={s.primaryText}>{billingBusy ? "..." : copy.pay}</Text>
+        </Pressable>
+        <Pressable style={s.outlineInline} disabled={billingBusy} onPress={() => void restore()}>
+          <Text style={s.outlineText}>{copy.restore}</Text>
+        </Pressable>
+        {!!billingMessage && <Text style={s.muted}>{billingMessage}</Text>}
       </View>
       <Pressable style={s.outline} onPress={() => void logout()}>
         <Text style={s.outlineText}>{logoutLabel}</Text>
