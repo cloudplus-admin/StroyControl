@@ -1,60 +1,234 @@
 import SwiftUI
 import PhotosUI
 
+private enum AppTab: String, CaseIterable, Identifiable {
+    case home, objects, tasks, quality, cameras, feed, supply, profile
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .home: "Сводка"
+        case .objects: "Объекты"
+        case .tasks: "Задачи"
+        case .quality: "Контроль"
+        case .cameras: "Камеры"
+        case .feed: "Лента"
+        case .supply: "Учет"
+        case .profile: "Профиль"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .home: "house"
+        case .objects: "building.2"
+        case .tasks: "checklist"
+        case .quality: "checkmark.shield"
+        case .cameras: "video"
+        case .feed: "text.bubble"
+        case .supply: "shippingbox"
+        case .profile: "person"
+        }
+    }
+}
+
 struct DashboardView: View {
     @Environment(SessionStore.self) private var session
     @State private var projects: [Project] = []
+    @State private var reviewers: [Reviewer] = []
     @State private var isLoading = true
     @State private var error = ""
+    @State private var selectedTab: AppTab = .home
+    @State private var query = ""
+    @State private var taskStatus = "all"
+    @State private var showCreateObject = false
+    @State private var showCreateTask = false
 
     private var tasks: [ProjectTask] { projects.flatMap(\.tasks) }
     private var documents: [ProjectDocument] { projects.flatMap { $0.documents ?? [] } }
     private var reports: [PhotoReport] { projects.flatMap { $0.photoReports ?? [] } }
+    private var defects: [ProjectDefect] { projects.flatMap { $0.defects ?? [] } }
+    private var feed: [FeedEvent] { projects.flatMap { $0.feed ?? [] }.sorted { $0.createdAt > $1.createdAt } }
 
-    var body: some View {
-        TabView {
-            NavigationStack { objectsView }
-                .tabItem { Label("Объекты", systemImage: "building.2") }
-            NavigationStack { tasksView }
-                .tabItem { Label("Задачи", systemImage: "checklist") }
-            NavigationStack { reportsView }
-                .tabItem { Label("Фото", systemImage: "camera") }
-            NavigationStack { documentsView }
-                .tabItem { Label("Документы", systemImage: "doc") }
-            NavigationStack { profileView }
-                .tabItem { Label("Профиль", systemImage: "person") }
-        }
-        .task { await load() }
+    private var roleCode: String {
+        let code = session.session?.user?.roles.first?.code ?? "pm"
+        return code == "owner" ? "director" : code
     }
 
-    @ViewBuilder private var objectsView: some View {
-        contentList(title: "Объекты") {
-            ForEach(projects) { project in
-                NavigationLink {
-                    ProjectDetailView(project: project)
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(project.name).font(.headline)
-                        Text(project.address).font(.subheadline).foregroundStyle(.secondary)
-                        ProgressView(value: Double(project.progress), total: 100) {
-                            Text("Готовность \(project.progress)%")
-                        }
-                        Text("Открытых задач: \(project.openTaskCount)").font(.caption)
+    private var canManage: Bool { ["owner", "director", "admin", "pm"].contains(roleCode) }
+
+    private var tabs: [AppTab] {
+        switch roleCode {
+        case "inspector": [.home, .tasks, .quality, .feed, .profile]
+        case "supplier": [.home, .supply, .feed, .profile]
+        case "finance": [.home, .objects, .feed, .profile]
+        case "foreman", "subcontractor": [.home, .objects, .tasks, .feed, .profile]
+        default: [.home, .objects, .tasks, .cameras, .feed, .profile]
+        }
+    }
+
+    private var filteredProjects: [Project] {
+        guard !query.isEmpty else { return projects }
+        return projects.filter { "\($0.name) \($0.address)".localizedCaseInsensitiveContains(query) }
+    }
+
+    private var filteredTasks: [ProjectTask] {
+        tasks.filter { task in
+            (taskStatus == "all" || task.status == taskStatus) &&
+            (query.isEmpty || "\(task.title) \(task.stage) \(task.assignee)".localizedCaseInsensitiveContains(query))
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    if isLoading { ProgressView("Загрузка...").frame(maxWidth: .infinity) }
+                    if !error.isEmpty {
+                        Text(error).foregroundStyle(.red)
+                        Button("Повторить") { Task { await load() } }
                     }
-                    .padding(.vertical, 4)
+                    selectedContent
                 }
+                .padding(16)
+                .padding(.bottom, 12)
+            }
+            .scrollBounceBehavior(.always)
+            .scrollIndicators(.visible)
+            .refreshable { await load() }
+            .navigationTitle(selectedTab.title)
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomNavigation }
+        }
+        .task { await load() }
+        .sheet(isPresented: $showCreateObject) {
+            ObjectCreationView {
+                showCreateObject = false
+                await load()
+            }
+        }
+        .sheet(isPresented: $showCreateTask) {
+            TaskCreationView(projects: projects) {
+                showCreateTask = false
+                await load()
             }
         }
     }
 
-    @ViewBuilder private var tasksView: some View {
-        contentList(title: "Задачи") {
-            ForEach(tasks) { task in
-                NavigationLink {
-                    TaskDetailView(task: task) { await load() }
-                } label: {
-                    taskRow(task)
+    @ViewBuilder private var selectedContent: some View {
+        switch selectedTab {
+        case .home: homeView
+        case .objects: objectsView
+        case .tasks: tasksView
+        case .quality: qualityView
+        case .cameras: camerasView
+        case .feed: feedView
+        case .supply: supplyView
+        case .profile: profileView
+        }
+    }
+
+    private var bottomNavigation: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(tabs) { tab in
+                    Button {
+                        selectedTab = tab
+                        query = ""
+                    } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: tab.icon).font(.system(size: 18, weight: .semibold))
+                            Text(tab.title).font(.caption2).lineLimit(1)
+                        }
+                        .foregroundStyle(selectedTab == tab ? Color.accentColor : Color.secondary)
+                        .frame(minWidth: 64)
+                        .padding(.vertical, 8)
+                    }
                 }
+            }
+            .padding(.horizontal, 8)
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    private var homeView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("StroyControl").font(.title.bold())
+            Text(session.session?.user?.fullName ?? "").foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                metric(title: "Объекты", value: projects.count, color: .blue)
+                metric(title: "Открытые", value: tasks.filter { $0.status != "done" }.count, color: .orange)
+                metric(title: "Дефекты", value: defects.filter { $0.status != "closed" }.count, color: .red)
+            }
+            Text("Ход строительства").font(.headline)
+            ForEach(projects.prefix(4)) { project in projectCard(project) }
+        }
+    }
+
+    private func metric(title: String, value: Int, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(value)").font(.title2.bold()).foregroundStyle(color)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
+    }
+
+    private var objectsView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if canManage {
+                Button { showCreateObject = true } label: { Label("Новый объект", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            searchField("Поиск по объекту или адресу")
+            if filteredProjects.isEmpty { ContentUnavailableView("Объекты не найдены", systemImage: "building.2") }
+            ForEach(filteredProjects) { project in
+                NavigationLink {
+                    ProjectDetailView(project: project)
+                } label: {
+                    projectCard(project)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func projectCard(_ project: Project) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack { Text(project.name).font(.headline); Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
+            Text(project.address).font(.subheadline).foregroundStyle(.secondary)
+            ProgressView(value: Double(project.progress), total: 100) { Text("Готовность \(project.progress)%") }
+            Text("Открытых задач: \(project.openTaskCount)").font(.caption)
+        }
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 18))
+        .shadow(color: .black.opacity(0.07), radius: 10, y: 4)
+    }
+
+    private var tasksView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if canManage {
+                Button { showCreateTask = true } label: { Label("Поставить задачу", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent)
+            }
+            searchField("Поиск по задаче, этапу или исполнителю")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    ForEach(["all", "open", "in_progress", "review", "done"], id: \.self) { value in
+                        Button(taskFilterTitle(value)) { taskStatus = value }
+                            .buttonStyle(.borderedProminent)
+                            .tint(taskStatus == value ? .accentColor : .gray.opacity(0.35))
+                    }
+                }
+            }
+            if filteredTasks.isEmpty { ContentUnavailableView("Задач по фильтру нет", systemImage: "checklist") }
+            ForEach(filteredTasks) { task in
+                NavigationLink {
+                    TaskDetailView(task: task, onChanged: { await load() }, reviewers: reviewers)
+                } label: {
+                    taskRow(task).cardStyle()
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -71,57 +245,71 @@ struct DashboardView: View {
         }.padding(.vertical, 4)
     }
 
-    @ViewBuilder private var reportsView: some View {
-        contentList(title: "Фотоотчеты") {
+    private var qualityView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Фото и технадзор").font(.title2.bold())
             ForEach(reports) { report in
-                LabeledContent(report.point ?? "Фотоотчет", value: statusTitle(report.status ?? ""))
+                LabeledContent(report.point ?? "Фотоотчет", value: statusTitle(report.status ?? "")).cardStyle()
+            }
+            ForEach(defects) { defect in
+                LabeledContent(defect.description, value: statusTitle(defect.status)).cardStyle()
+            }
+            if reports.isEmpty && defects.isEmpty { ContentUnavailableView("Записей пока нет", systemImage: "checkmark.shield") }
+        }
+    }
+
+    private var camerasView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Камеры объектов").font(.title2.bold())
+            ForEach(projects) { project in
+                HStack { Image(systemName: "video").foregroundStyle(.green); Text(project.name); Spacer(); Text("Онлайн").foregroundStyle(.green) }.cardStyle()
             }
         }
     }
 
-    @ViewBuilder private var documentsView: some View {
-        contentList(title: "Документы") {
+    private var feedView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Лента и документы").font(.title2.bold())
+            ForEach(feed) { event in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(event.author).font(.headline)
+                    Text(event.body)
+                    Text(event.createdAt).font(.caption).foregroundStyle(.secondary)
+                }.cardStyle()
+            }
             ForEach(documents) { document in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(document.name).font(.headline)
                     Text("Версия \(document.version) - \(statusTitle(document.status))")
                         .font(.caption).foregroundStyle(.secondary)
-                }.padding(.vertical, 4)
+                }.cardStyle()
             }
+            if feed.isEmpty && documents.isEmpty { ContentUnavailableView("Лента пока пуста", systemImage: "text.bubble") }
         }
+    }
+
+    private var supplyView: some View {
+        ContentUnavailableView("Учет материалов", systemImage: "shippingbox", description: Text("Данные учета подключаются к серверу"))
     }
 
     private var profileView: some View {
-        List {
-            Section("Пользователь") {
-                LabeledContent("Имя", value: session.session?.user?.fullName ?? "-")
-                LabeledContent("Компания", value: session.session?.user?.companyName ?? "-")
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            LabeledContent("Имя", value: session.session?.user?.fullName ?? "-").cardStyle()
+            LabeledContent("Компания", value: session.session?.user?.companyName ?? "-").cardStyle()
+            LabeledContent("Роль", value: roleCode).cardStyle()
             Button("Выйти", role: .destructive) { Task { await session.logout() } }
+                .buttonStyle(.borderedProminent)
         }
-        .scrollBounceBehavior(.always)
-        .navigationTitle("Профиль")
     }
 
-    private func contentList<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        List {
-            if isLoading { ProgressView("Загрузка...") }
-            if !error.isEmpty {
-                Section {
-                    Text(error).foregroundStyle(.red)
-                    Button("Повторить") { Task { await load() } }
-                }
-            }
-            content()
+    private func searchField(_ placeholder: String) -> some View {
+        HStack {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(placeholder, text: $query)
+            if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill") } }
         }
-        .scrollBounceBehavior(.always)
-        .navigationTitle(title)
-        .refreshable { await load() }
-        .overlay {
-            if !isLoading && error.isEmpty && projects.isEmpty {
-                ContentUnavailableView("Данных пока нет", systemImage: "tray")
-            }
-        }
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func load() async {
@@ -129,11 +317,17 @@ struct DashboardView: View {
         isLoading = true
         error = ""
         defer { isLoading = false }
-        do { projects = try await APIClient.shared.bootstrap(session: current).objects }
+        do {
+            let response = try await APIClient.shared.bootstrap(session: current)
+            projects = response.objects
+            reviewers = response.reviewers ?? []
+        }
         catch APIError.invalidCredentials {
             do {
                 let refreshed = try await session.refresh()
-                projects = try await APIClient.shared.bootstrap(session: refreshed).objects
+                let response = try await APIClient.shared.bootstrap(session: refreshed)
+                projects = response.objects
+                reviewers = response.reviewers ?? []
             } catch { self.error = error.localizedDescription }
         }
         catch { self.error = error.localizedDescription }
@@ -150,6 +344,16 @@ struct DashboardView: View {
         }
     }
 
+    private func taskFilterTitle(_ value: String) -> String {
+        switch value {
+        case "open": "Открытые"
+        case "in_progress": "В работе"
+        case "review": "На проверке"
+        case "done": "Готово"
+        default: "Все"
+        }
+    }
+
     private func statusColor(_ value: String) -> Color {
         switch value {
         case "done", "accepted", "approved": .green
@@ -157,6 +361,139 @@ struct DashboardView: View {
         case "rejected": .red
         default: .secondary
         }
+    }
+}
+
+private struct ObjectCreationView: View {
+    @Environment(SessionStore.self) private var session
+    @Environment(\.dismiss) private var dismiss
+    let created: () async -> Void
+
+    @State private var name = ""
+    @State private var address = ""
+    @State private var templateCode = "typical_house"
+    @State private var isSaving = false
+    @State private var error = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Объект") {
+                    TextField("Название", text: $name)
+                    TextField("Адрес", text: $address)
+                    Picker("Тип", selection: $templateCode) {
+                        Text("Типовой дом").tag("typical_house")
+                        Text("Многоэтажный дом").tag("high_rise")
+                        Text("Реконструкция").tag("renovation")
+                    }
+                }
+                if !error.isEmpty { Text(error).foregroundStyle(.red) }
+            }
+            .navigationTitle("Новый объект")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Создать") { Task { await save() } }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        guard let current = session.session else { return }
+        isSaving = true
+        error = ""
+        defer { isSaving = false }
+        do {
+            try await APIClient.shared.createObject(
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                address: address.trimmingCharacters(in: .whitespacesAndNewlines),
+                templateCode: templateCode,
+                session: current
+            )
+            await created()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+private struct TaskCreationView: View {
+    @Environment(SessionStore.self) private var session
+    @Environment(\.dismiss) private var dismiss
+    let projects: [Project]
+    let created: () async -> Void
+
+    @State private var title = ""
+    @State private var projectId = ""
+    @State private var sections: [PlanningSection] = []
+    @State private var sectionId = ""
+    @State private var priority = "normal"
+    @State private var due = Date()
+    @State private var hasDeadline = false
+    @State private var isSaving = false
+    @State private var error = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Задача") {
+                    TextField("Название", text: $title)
+                    Picker("Объект", selection: $projectId) {
+                        ForEach(projects) { Text($0.name).tag($0.id) }
+                    }
+                    Picker("Раздел работ", selection: $sectionId) {
+                        ForEach(sections) { Text($0.name).tag($0.id) }
+                    }
+                    Picker("Приоритет", selection: $priority) {
+                        Text("Низкий").tag("low")
+                        Text("Обычный").tag("normal")
+                        Text("Высокий").tag("high")
+                    }
+                    Toggle("Указать срок", isOn: $hasDeadline)
+                    if hasDeadline { DatePicker("Срок", selection: $due, displayedComponents: [.date, .hourAndMinute]) }
+                }
+                if sections.isEmpty && !projectId.isEmpty { Text("В объекте нет разделов работ").foregroundStyle(.secondary) }
+                if !error.isEmpty { Text(error).foregroundStyle(.red) }
+            }
+            .navigationTitle("Новая задача")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Создать") { Task { await save() } }
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || sectionId.isEmpty || isSaving)
+                }
+            }
+            .task {
+                if projectId.isEmpty { projectId = projects.first?.id ?? "" }
+                await loadSections()
+            }
+            .onChange(of: projectId) { _, _ in Task { await loadSections() } }
+        }
+    }
+
+    private func loadSections() async {
+        guard let current = session.session, !projectId.isEmpty else { return }
+        do {
+            sections = try await APIClient.shared.objectPlanning(objectId: projectId, session: current).stages.flatMap(\.sections)
+            sectionId = sections.first?.id ?? ""
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func save() async {
+        guard let current = session.session else { return }
+        isSaving = true
+        error = ""
+        defer { isSaving = false }
+        do {
+            let formatter = ISO8601DateFormatter()
+            _ = try await APIClient.shared.createTask(
+                sectionId: sectionId,
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                priority: priority,
+                plannedEnd: hasDeadline ? formatter.string(from: due) : nil,
+                session: current
+            )
+            await created()
+        } catch { self.error = error.localizedDescription }
     }
 }
 
@@ -173,7 +510,7 @@ private struct ProjectDetailView: View {
             Section("Задачи") {
                 ForEach(project.tasks) { task in
                     NavigationLink {
-                        TaskDetailView(task: task) { }
+                        TaskDetailView(task: task, onChanged: { })
                     } label: {
                         VStack(alignment: .leading) {
                             Text(task.title)
@@ -192,6 +529,7 @@ private struct TaskDetailView: View {
     @Environment(SessionStore.self) private var session
     let task: ProjectTask
     let onChanged: () async -> Void
+    let reviewers: [Reviewer]
 
     @State private var checklist: [ChecklistItem]
     @State private var updatingItemIds: Set<String> = []
@@ -202,11 +540,20 @@ private struct TaskDetailView: View {
     @State private var isClosing = false
     @State private var isClosed = false
     @State private var closeOperationId: String?
+    @State private var isEditing = false
+    @State private var editTitle = ""
+    @State private var editDescription = ""
+    @State private var editPriority = "normal"
+    @State private var isSaving = false
+    @State private var isAssigningReviewer = false
+    @State private var reviewNote = ""
+    @State private var isReviewing = false
     @StateObject private var locationProvider = TaskLocationProvider()
 
-    init(task: ProjectTask, onChanged: @escaping () async -> Void) {
+    init(task: ProjectTask, onChanged: @escaping () async -> Void, reviewers: [Reviewer] = []) {
         self.task = task
         self.onChanged = onChanged
+        self.reviewers = reviewers
         _checklist = State(initialValue: task.checklist)
     }
 
@@ -220,6 +567,14 @@ private struct TaskDetailView: View {
                 LabeledContent("Статус", value: statusTitle(task.status))
                 if let description = task.description, !description.isEmpty {
                     Text(description)
+                }
+                if canManage {
+                    Button("Редактировать задачу") {
+                        editTitle = task.title
+                        editDescription = task.description ?? ""
+                        editPriority = task.priority
+                        isEditing = true
+                    }
                 }
             }
 
@@ -240,6 +595,28 @@ private struct TaskDetailView: View {
                         }
                     }
                     .disabled(updatingItemIds.contains(item.id) || task.status == "done")
+                }
+            }
+
+            if canManage && !reviewers.isEmpty {
+                Section("Технадзор") {
+                    Text(task.reviewerName ?? "Проверяющий не назначен").foregroundStyle(.secondary)
+                    Menu("Назначить проверяющего") {
+                        ForEach(reviewers.filter { $0.objectIds.isEmpty || $0.objectIds.contains(task.objectId) }) { reviewer in
+                            Button(reviewer.name) { Task { await assign(reviewer) } }
+                        }
+                    }
+                    .disabled(isAssigningReviewer)
+                }
+            }
+
+            if isInspector && task.status == "review" {
+                Section("Решение технадзора") {
+                    TextField("Комментарий, обязателен при отклонении", text: $reviewNote, axis: .vertical)
+                    Button("Принять работу") { Task { await review(accepted: true) } }
+                        .disabled(isReviewing)
+                    Button("Отклонить", role: .destructive) { Task { await review(accepted: false) } }
+                        .disabled(reviewNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isReviewing)
                 }
             }
 
@@ -298,6 +675,81 @@ private struct TaskDetailView: View {
             }
             .ignoresSafeArea()
         }
+        .sheet(isPresented: $isEditing) {
+            NavigationStack {
+                Form {
+                    TextField("Название", text: $editTitle)
+                    TextField("Описание", text: $editDescription, axis: .vertical).lineLimit(3...8)
+                    Picker("Приоритет", selection: $editPriority) {
+                        Text("Низкий").tag("low")
+                        Text("Обычный").tag("normal")
+                        Text("Высокий").tag("high")
+                    }
+                    if !error.isEmpty { Text(error).foregroundStyle(.red) }
+                }
+                .navigationTitle("Редактирование")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Отмена") { isEditing = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Сохранить") { Task { await saveTask() } }
+                            .disabled(editTitle.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
+                    }
+                }
+            }
+        }
+    }
+
+    private var canManage: Bool {
+        session.session?.user?.roles.contains { ["admin", "owner", "pm"].contains($0.code) } == true
+    }
+
+    private var isInspector: Bool {
+        session.session?.user?.roles.contains { $0.code == "inspector" } == true
+    }
+
+    private func saveTask() async {
+        guard let current = session.session else { return }
+        isSaving = true
+        error = ""
+        defer { isSaving = false }
+        do {
+            try await APIClient.shared.updateTask(
+                taskId: task.id,
+                title: editTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+                description: editDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+                priority: editPriority,
+                session: current
+            )
+            isEditing = false
+            await onChanged()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func assign(_ reviewer: Reviewer) async {
+        guard let current = session.session else { return }
+        isAssigningReviewer = true
+        error = ""
+        defer { isAssigningReviewer = false }
+        do {
+            try await APIClient.shared.assignReviewer(taskId: task.id, reviewerId: reviewer.id, session: current)
+            await onChanged()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func review(accepted: Bool) async {
+        guard let current = session.session else { return }
+        isReviewing = true
+        error = ""
+        defer { isReviewing = false }
+        do {
+            try await APIClient.shared.reviewTask(
+                taskId: task.id,
+                accepted: accepted,
+                note: reviewNote.trimmingCharacters(in: .whitespacesAndNewlines),
+                session: current
+            )
+            await onChanged()
+        } catch { self.error = error.localizedDescription }
     }
 
     private func closeTask() async {
@@ -363,8 +815,19 @@ private struct TaskDetailView: View {
         switch value {
         case "high": "Высокий"
         case "medium": "Средний"
+        case "normal": "Средний"
         case "low": "Низкий"
         default: value
         }
+    }
+}
+
+private extension View {
+    func cardStyle() -> some View {
+        self
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background, in: RoundedRectangle(cornerRadius: 18))
+            .shadow(color: .black.opacity(0.07), radius: 10, y: 4)
     }
 }

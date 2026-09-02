@@ -30,7 +30,33 @@ struct RefreshResponse: Codable {
 
 struct BootstrapResponse: Codable {
     let serverTime: String
+    let reviewers: [Reviewer]?
     let objects: [Project]
+}
+
+struct Reviewer: Codable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let objectIds: [String]
+}
+
+struct CreatedEntity: Codable {
+    let id: String
+}
+
+struct ObjectPlanning: Codable {
+    let stages: [PlanningStage]
+}
+
+struct PlanningStage: Codable, Identifiable {
+    let id: String
+    let name: String
+    let sections: [PlanningSection]
+}
+
+struct PlanningSection: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
 }
 
 struct Project: Codable, Hashable, Identifiable {
@@ -41,8 +67,27 @@ struct Project: Codable, Hashable, Identifiable {
     let tasks: [ProjectTask]
     let documents: [ProjectDocument]?
     let photoReports: [PhotoReport]?
+    let defects: [ProjectDefect]?
+    let feed: [FeedEvent]?
 
     var openTaskCount: Int { tasks.filter { $0.status != "done" }.count }
+}
+
+struct ProjectDefect: Codable, Hashable, Identifiable {
+    let id: String
+    let objectId: String
+    let description: String
+    let status: String
+    let createdAt: String
+}
+
+struct FeedEvent: Codable, Hashable, Identifiable {
+    let id: String
+    let objectId: String
+    let author: String
+    let body: String
+    let reactions: Int
+    let createdAt: String
 }
 
 struct ProjectTask: Codable, Hashable, Identifiable {
@@ -54,7 +99,10 @@ struct ProjectTask: Codable, Hashable, Identifiable {
     let due: String
     let priority: String
     let assignee: String
+    let assigneeId: String?
     let status: String
+    let reviewerId: String?
+    let reviewerName: String?
     let checklist: [ChecklistItem]
 }
 

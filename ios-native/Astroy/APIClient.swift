@@ -69,6 +69,75 @@ actor APIClient {
         }
     }
 
+    func createObject(name: String, address: String, templateCode: String, session: Session) async throws {
+        var request = authorizedRequest(path: "/api/objects", session: session)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode([
+            "name": name,
+            "address": address,
+            "templateCode": templateCode,
+        ])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
+    func objectPlanning(objectId: String, session: Session) async throws -> ObjectPlanning {
+        let request = authorizedRequest(path: "/api/objects/\(objectId)", session: session)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+        do { return try decoder.decode(ObjectPlanning.self, from: data) }
+        catch { throw APIError.invalidResponse }
+    }
+
+    func createTask(sectionId: String, title: String, priority: String, plannedEnd: String?, session: Session) async throws -> CreatedEntity {
+        var request = authorizedRequest(path: "/api/objects/sections/\(sectionId)/tasks", session: session)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var payload: [String: Any] = ["title": title, "priority": priority, "dependsOn": [] as [String]]
+        if let plannedEnd, !plannedEnd.isEmpty { payload["plannedEnd"] = plannedEnd }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+        do { return try decoder.decode(CreatedEntity.self, from: data) }
+        catch { throw APIError.invalidResponse }
+    }
+
+    func updateTask(taskId: String, title: String, description: String, priority: String, session: Session) async throws {
+        var request = authorizedRequest(path: "/api/tasks/\(taskId)", session: session)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode([
+            "title": title,
+            "description": description,
+            "priority": priority,
+        ])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
+    func assignReviewer(taskId: String, reviewerId: String, session: Session) async throws {
+        var request = authorizedRequest(path: "/api/tasks/\(taskId)/reviewer", session: session)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(["reviewerId": reviewerId])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
+    func reviewTask(taskId: String, accepted: Bool, note: String, session: Session) async throws {
+        var request = authorizedRequest(path: "/api/tasks/\(taskId)/review", session: session)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("ios-review-\(UUID().uuidString)", forHTTPHeaderField: "idempotency-key")
+        request.httpBody = try encoder.encode([
+            "decision": accepted ? "accepted" : "rejected",
+            "note": note,
+        ])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
     func setChecklistItem(taskId: String, itemId: String, isDone: Bool, session: Session) async throws -> ChecklistMutationResponse {
         var request = authorizedRequest(
             path: "/api/tasks/\(taskId)/checklist/\(itemId)",
