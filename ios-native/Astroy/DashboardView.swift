@@ -529,7 +529,7 @@ private struct FullScreenPhotoView: View {
                 let data = try await APIClient.shared.imageData(url: url, session: session)
                 image = UIImage(data: data)
                 error = image == nil
-            } catch { error = true }
+            } catch { self.error = true }
         }
     }
 }
