@@ -1,4 +1,4 @@
-import CoreLocation
+@preconcurrency import CoreLocation
 import SwiftUI
 import UIKit
 
