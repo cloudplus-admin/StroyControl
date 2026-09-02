@@ -98,3 +98,9 @@
 "Связь прервалась. Закрытие задачи сохранено и отправится автоматически" = "Aloqa uzildi. Vazifani yopish saqlandi va avtomatik yuboriladi";
 "Сначала отметь все пункты чек-листа" = "Avval tekshiruv ro'yxatidagi barcha bandlarni belgilang";
 "Сначала заверши связанные задачи" = "Avval bog'liq vazifalarni yakunlang";
+"Тарифы" = "Tariflar";
+"Выбери подходящий тип работ. Цены и оплата будут добавлены позже." = "Mos ish turini tanlang. Narxlar va to'lov keyinroq qo'shiladi.";
+"Разовая работа" = "Bir martalik ish";
+"Ремонтные работы 100-300 кв. м" = "100-300 kv. m ta'mirlash ishlari";
+"Строительство домов" = "Uylar qurilishi";
+"Строительство многоэтажек и бизнес-центров" = "Ko'p qavatli uylar va biznes markazlari qurilishi";

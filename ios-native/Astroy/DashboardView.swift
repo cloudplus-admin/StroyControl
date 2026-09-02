@@ -31,6 +31,15 @@ private enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
+private enum SubscriptionPlan: String, CaseIterable, Identifiable {
+    case oneTime = "Разовая работа"
+    case renovation = "Ремонтные работы 100-300 кв. м"
+    case houses = "Строительство домов"
+    case commercial = "Строительство многоэтажек и бизнес-центров"
+
+    var id: String { rawValue }
+}
+
 struct DashboardView: View {
     @Environment(SessionStore.self) private var session
     @Environment(LanguageStore.self) private var language
@@ -45,6 +54,7 @@ struct DashboardView: View {
     @State private var showCreateTask = false
     @State private var pendingClosureCount = 0
     @State private var selectedPhotoURL: String?
+    @AppStorage("astroy.subscription-plan") private var selectedPlan = SubscriptionPlan.oneTime.rawValue
 
     private var tasks: [ProjectTask] { projects.flatMap(\.tasks) }
     private var documents: [ProjectDocument] { projects.flatMap { $0.documents ?? [] } }
@@ -341,6 +351,28 @@ struct DashboardView: View {
             LabeledContent("Имя", value: session.session?.user?.fullName ?? "-").cardStyle()
             LabeledContent("Компания", value: session.session?.user?.companyName ?? "-").cardStyle()
             LabeledContent("Роль", value: roleCode).cardStyle()
+            VStack(alignment: .leading, spacing: 10) {
+                Text(language.text("Тарифы")).font(.headline)
+                Text(language.text("Выбери подходящий тип работ. Цены и оплата будут добавлены позже."))
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(SubscriptionPlan.allCases) { plan in
+                    Button {
+                        selectedPlan = plan.rawValue
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: selectedPlan == plan.rawValue ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedPlan == plan.rawValue ? Color.accentColor : Color.secondary)
+                            Text(language.text(plan.rawValue))
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .cardStyle()
             Button("Выйти", role: .destructive) { Task { await session.logout() } }
                 .buttonStyle(.borderedProminent)
         }

@@ -98,3 +98,9 @@
 "Связь прервалась. Закрытие задачи сохранено и отправится автоматически" = "Connection was interrupted. Task completion was saved and will sync automatically";
 "Сначала отметь все пункты чек-листа" = "Complete every checklist item first";
 "Сначала заверши связанные задачи" = "Complete dependent tasks first";
+"Тарифы" = "Plans";
+"Выбери подходящий тип работ. Цены и оплата будут добавлены позже." = "Choose the appropriate type of work. Prices and payment will be added later.";
+"Разовая работа" = "One-time job";
+"Ремонтные работы 100-300 кв. м" = "Renovation work, 100-300 sq. m";
+"Строительство домов" = "House construction";
+"Строительство многоэтажек и бизнес-центров" = "Construction of apartment buildings and business centers";
