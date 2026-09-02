@@ -22,6 +22,7 @@ model Company {
   documents ProjectDocument[]
   workActs  WorkAct[]
   mobileRecords MobileRecord[]
+  subscriptions CompanySubscription[]
 
   @@map("companies")
 }
@@ -440,4 +441,24 @@ model MobileRecord {
   @@unique([companyId, kind, clientId])
   @@index([companyId, objectId, kind, updatedAt])
   @@map("mobile_records")
+}
+
+model CompanySubscription {
+  id                    String    @id @default(uuid())
+  companyId             String    @map("company_id")
+  company               Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId                String    @map("user_id")
+  platform              String
+  productId             String    @map("product_id")
+  transactionId         String    @map("transaction_id")
+  originalTransactionId String?   @map("original_transaction_id")
+  status                String
+  purchasedAt           DateTime? @map("purchased_at")
+  expiresAt             DateTime? @map("expires_at")
+  verifiedAt            DateTime  @default(now()) @map("verified_at")
+  rawResponse            Json?     @map("raw_response")
+
+  @@unique([platform, transactionId])
+  @@index([companyId, status, expiresAt])
+  @@map("company_subscriptions")
 }

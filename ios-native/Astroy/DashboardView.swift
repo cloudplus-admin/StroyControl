@@ -387,7 +387,9 @@ struct DashboardView: View {
                 }
                 if let plan = SubscriptionPlan(rawValue: selectedPlan) {
                     Button {
-                        Task { _ = await store.purchase(productID: plan.productID) }
+                        if let current = session.session {
+                            Task { _ = await store.purchase(productID: plan.productID, session: current) }
+                        }
                     } label: {
                         if store.isLoading { ProgressView().frame(maxWidth: .infinity) }
                         else { Text(language.text("Оплатить через App Store")).frame(maxWidth: .infinity) }
@@ -395,7 +397,9 @@ struct DashboardView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(store.isLoading || store.activeProductIDs.contains(plan.productID))
                 }
-                Button(language.text("Восстановить покупки")) { Task { await store.restore() } }
+                Button(language.text("Восстановить покупки")) {
+                    if let current = session.session { Task { await store.restore(session: current) } }
+                }
                     .disabled(store.isLoading)
                 if !store.message.isEmpty {
                     Text(store.message).font(.caption).foregroundStyle(.secondary)
@@ -419,6 +423,7 @@ struct DashboardView: View {
 
     private func load() async {
         guard let current = session.session else { return }
+        await store.syncServer(session: current)
         isLoading = true
         error = ""
         defer { isLoading = false }

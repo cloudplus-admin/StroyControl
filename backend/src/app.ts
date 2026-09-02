@@ -15,6 +15,7 @@ import { mobileRecordsRouter } from './modules/mobile/records';
 import { planningRouter } from './modules/planning/router';
 import { documentsRouter } from './modules/documents/router';
 import { notificationsRouter } from './modules/notifications/router';
+import { billingRouter } from './modules/billing/router';
 import { prisma } from './db/prisma';
 import { ZodError } from 'zod';
 import { configuredOrigins, securityHeaders } from './http/security';
@@ -60,6 +61,7 @@ export function createApp() {
   app.use('/api/planning', planningRouter);
   app.use('/api', documentsRouter);
   app.use('/api/notifications', notificationsRouter);
+  app.use('/api/billing', billingRouter);
   app.use('/api/objects', objectsRouter);
   app.use('/api/tasks', tasksRouter);
   app.use('/api', photocontrolRouter);

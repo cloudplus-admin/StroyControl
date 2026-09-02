@@ -33,7 +33,7 @@ final class StoreManager {
         products.first { $0.id == id }
     }
 
-    func purchase(productID: String) async -> Bool {
+    func purchase(productID: String, session: Session) async -> Bool {
         guard let product = product(id: productID) else {
             message = L10n.text("Оплата пока недоступна. Тариф не настроен в App Store.")
             return false
@@ -45,6 +45,7 @@ final class StoreManager {
             switch result {
             case .success(let verification):
                 let transaction = try verified(verification)
+                try await APIClient.shared.verifyPurchase(productID: transaction.productID, transactionID: transaction.id, session: session)
                 await transaction.finish()
                 await refreshEntitlements()
                 message = L10n.text("Оплата прошла успешно")
@@ -62,15 +63,26 @@ final class StoreManager {
         return false
     }
 
-    func restore() async {
+    func restore(session: Session) async {
         isLoading = true
         defer { isLoading = false }
         do {
             try await AppStore.sync()
+            for await result in Transaction.currentEntitlements {
+                guard let transaction = try? verified(result), transaction.revocationDate == nil else { continue }
+                try await APIClient.shared.verifyPurchase(productID: transaction.productID, transactionID: transaction.id, session: session)
+            }
             await refreshEntitlements()
             message = L10n.text("Покупки восстановлены")
         } catch {
             message = L10n.text("Не удалось восстановить покупки")
+        }
+    }
+
+    func syncServer(session: Session) async {
+        for await result in Transaction.currentEntitlements {
+            guard let transaction = try? verified(result), transaction.revocationDate == nil else { continue }
+            try? await APIClient.shared.verifyPurchase(productID: transaction.productID, transactionID: transaction.id, session: session)
         }
     }
 

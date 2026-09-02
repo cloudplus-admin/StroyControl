@@ -709,6 +709,7 @@ export default function App() {
         )}
         {tab === "profile" && (
           <ProfileScreen
+            api={api}
             t={t}
             lang={lang}
             setLang={setLang}
@@ -3211,12 +3212,14 @@ function SafetyScreen({ lang, data, updateData }: { lang: Lang; data: AppData; u
 }
 
 function ProfileScreen({
+  api,
   t,
   lang,
   setLang,
   activeRole,
   logout,
 }: {
+  api: ApiClient | null;
   t: UiCopy;
   lang: Lang;
   setLang: (v: Lang) => void;
@@ -3284,7 +3287,17 @@ function ProfileScreen({
       const result = await requestPurchase(request);
       const purchases = Array.isArray(result) ? result : result ? [result] : [];
       for (const purchase of purchases) {
-        await finishTransaction({ purchase, isConsumable: selectedPlan.type === "in-app" });
+        const proof = purchase as typeof purchase & { purchaseToken?: string; transactionId?: string };
+        const transactionId = proof.transactionId ?? proof.purchaseToken;
+        if (!transactionId) throw new Error('billing_receipt_missing');
+        if (!api) throw new Error('billing_session_missing');
+        const verified = await api.request('/api/billing/verify', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ platform: 'android', productId: selectedPlan.id, transactionId, purchaseToken: proof.purchaseToken ?? transactionId }),
+        });
+        if (!verified.ok) throw new Error('billing_verification_failed');
+        await finishTransaction({ purchase, isConsumable: false });
       }
       if (purchases.length > 0) setBillingMessage(copy.success);
     } catch {

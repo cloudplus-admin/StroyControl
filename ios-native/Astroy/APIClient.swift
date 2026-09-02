@@ -56,6 +56,19 @@ actor APIClient {
         _ = try? await URLSession.shared.data(for: request)
     }
 
+    func verifyPurchase(productID: String, transactionID: UInt64, session: Session) async throws {
+        var request = authorizedRequest(path: "/api/billing/verify", session: session)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode([
+            "platform": "ios",
+            "productId": productID,
+            "transactionId": String(transactionID),
+        ])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
     func bootstrap(session: Session) async throws -> BootstrapResponse {
         let request = authorizedRequest(path: "/api/mobile/bootstrap", session: session)
         let (data, response) = try await URLSession.shared.data(for: request)
