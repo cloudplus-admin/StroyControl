@@ -38,11 +38,20 @@ private enum SubscriptionPlan: String, CaseIterable, Identifiable {
     case commercial = "Строительство многоэтажек и бизнес-центров"
 
     var id: String { rawValue }
+    var productID: String {
+        switch self {
+        case .oneTime: "uz.cloudplus.stroycontrol.one_time_job"
+        case .renovation: "uz.cloudplus.stroycontrol.renovation_monthly"
+        case .houses: "uz.cloudplus.stroycontrol.houses_monthly"
+        case .commercial: "uz.cloudplus.stroycontrol.commercial_monthly"
+        }
+    }
 }
 
 struct DashboardView: View {
     @Environment(SessionStore.self) private var session
     @Environment(LanguageStore.self) private var language
+    @Environment(StoreManager.self) private var store
     @State private var projects: [Project] = []
     @State private var reviewers: [Reviewer] = []
     @State private var isLoading = true
@@ -353,7 +362,7 @@ struct DashboardView: View {
             LabeledContent("Роль", value: roleCode).cardStyle()
             VStack(alignment: .leading, spacing: 10) {
                 Text(language.text("Тарифы")).font(.headline)
-                Text(language.text("Выбери подходящий тип работ. Цены и оплата будут добавлены позже."))
+                Text(language.text("Выбери тариф и оплати его через App Store."))
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach(SubscriptionPlan.allCases) { plan in
                     Button {
@@ -366,10 +375,30 @@ struct DashboardView: View {
                                 .foregroundStyle(.primary)
                                 .multilineTextAlignment(.leading)
                             Spacer()
+                            if store.activeProductIDs.contains(plan.productID) {
+                                Text(language.text("Активен")).font(.caption).foregroundStyle(.green)
+                            } else if let product = store.product(id: plan.productID) {
+                                Text(product.displayPrice).font(.subheadline.weight(.semibold))
+                            }
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                }
+                if let plan = SubscriptionPlan(rawValue: selectedPlan) {
+                    Button {
+                        Task { _ = await store.purchase(productID: plan.productID) }
+                    } label: {
+                        if store.isLoading { ProgressView().frame(maxWidth: .infinity) }
+                        else { Text(language.text("Оплатить через App Store")).frame(maxWidth: .infinity) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(store.isLoading || store.activeProductIDs.contains(plan.productID))
+                }
+                Button(language.text("Восстановить покупки")) { Task { await store.restore() } }
+                    .disabled(store.isLoading)
+                if !store.message.isEmpty {
+                    Text(store.message).font(.caption).foregroundStyle(.secondary)
                 }
             }
             .cardStyle()

@@ -104,3 +104,14 @@
 "Ремонтные работы 100-300 кв. м" = "100-300 kv. m ta'mirlash ishlari";
 "Строительство домов" = "Uylar qurilishi";
 "Строительство многоэтажек и бизнес-центров" = "Ko'p qavatli uylar va biznes markazlari qurilishi";
+"Выбери тариф и оплати его через App Store." = "Tarifni tanlang va App Store orqali to'lang.";
+"Активен" = "Faol";
+"Оплатить через App Store" = "App Store orqali to'lash";
+"Восстановить покупки" = "Xaridlarni tiklash";
+"Оплата пока недоступна. Тариф не настроен в App Store." = "To'lov hozircha mavjud emas. Tarif App Store'da sozlanmagan.";
+"Оплата прошла успешно" = "To'lov muvaffaqiyatli amalga oshirildi";
+"Оплата ожидает подтверждения" = "To'lov tasdiqlanishi kutilmoqda";
+"Не удалось завершить оплату" = "To'lovni yakunlab bo'lmadi";
+"Покупки восстановлены" = "Xaridlar tiklandi";
+"Не удалось восстановить покупки" = "Xaridlarni tiklab bo'lmadi";
+"Не удалось загрузить тарифы из App Store" = "App Store'dan tariflarni yuklab bo'lmadi";

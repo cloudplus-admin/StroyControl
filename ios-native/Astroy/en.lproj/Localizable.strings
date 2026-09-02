@@ -104,3 +104,14 @@
 "Ремонтные работы 100-300 кв. м" = "Renovation work, 100-300 sq. m";
 "Строительство домов" = "House construction";
 "Строительство многоэтажек и бизнес-центров" = "Construction of apartment buildings and business centers";
+"Выбери тариф и оплати его через App Store." = "Choose a plan and pay through the App Store.";
+"Активен" = "Active";
+"Оплатить через App Store" = "Pay through the App Store";
+"Восстановить покупки" = "Restore purchases";
+"Оплата пока недоступна. Тариф не настроен в App Store." = "Payment is not available yet. This plan is not configured in the App Store.";
+"Оплата прошла успешно" = "Payment completed successfully";
+"Оплата ожидает подтверждения" = "Payment is awaiting approval";
+"Не удалось завершить оплату" = "Payment could not be completed";
+"Покупки восстановлены" = "Purchases restored";
+"Не удалось восстановить покупки" = "Purchases could not be restored";
+"Не удалось загрузить тарифы из App Store" = "Plans could not be loaded from the App Store";
