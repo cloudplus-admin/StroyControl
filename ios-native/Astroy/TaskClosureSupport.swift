@@ -14,7 +14,7 @@ enum LocationError: LocalizedError {
 }
 
 @MainActor
-final class TaskLocationProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
+final class TaskLocationProvider: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var continuation: CheckedContinuation<CLLocation, Error>?
 
