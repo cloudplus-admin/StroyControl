@@ -15,6 +15,15 @@ final class SessionDecodingTests: XCTestCase {
         XCTAssertEqual(response.objects.first?.tasks.first?.title, "Колонны")
     }
 
+    func testDecodesPhotoReportImages() throws {
+        let json = #"{"serverTime":"2026-09-02T09:00:00.000Z","objects":[{"id":"o1","name":"Объект","address":"Ташкент","progress":42,"tasks":[],"photoReports":[{"id":"p1","objectId":"o1","point":"Фасад","fileUrl":"https://example.com/main.jpg","photos":[{"angle":"Слева","uri":"https://example.com/left.jpg"}],"status":"review","createdAt":"2026-09-02T09:00:00.000Z"}]}]}"#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(BootstrapResponse.self, from: json)
+        XCTAssertEqual(response.objects[0].photoReports?[0].imageURLs, [
+            "https://example.com/main.jpg",
+            "https://example.com/left.jpg",
+        ])
+    }
+
     func testDecodesChecklistMutationResponse() throws {
         let json = #"{"id":"c1","taskId":"t1","label":"Проверить каски","isDone":true}"#.data(using: .utf8)!
         let response = try JSONDecoder().decode(ChecklistMutationResponse.self, from: json)
@@ -45,5 +54,30 @@ final class SessionDecodingTests: XCTestCase {
         let updated = Session(accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresIn: tokens.expiresIn, user: current.user)
         XCTAssertEqual(updated.user?.roles.first?.code, "pm")
         XCTAssertEqual(updated.accessToken, "new")
+    }
+
+    func testOfflineQueuePersistsTaskClosure() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let fileURL = directory.appending(path: "queue.json")
+        let operation = PendingTaskClosure(
+            id: "operation-1",
+            taskId: "task-1",
+            photoData: Data([1, 2, 3]),
+            latitude: 41.3111,
+            longitude: 69.2797,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let queue = OfflineQueue(fileURL: fileURL)
+        try await queue.enqueue(operation)
+        let queuedCount = await queue.count()
+        XCTAssertEqual(queuedCount, 1)
+
+        let restored = OfflineQueue(fileURL: fileURL)
+        let restoredOperations = await restored.all()
+        XCTAssertEqual(restoredOperations, [operation])
+        try await restored.remove(id: operation.id)
+        let finalCount = await restored.count()
+        XCTAssertEqual(finalCount, 0)
     }
 }

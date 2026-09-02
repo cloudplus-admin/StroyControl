@@ -69,6 +69,18 @@ actor APIClient {
         }
     }
 
+    func imageData(url: String, session: Session) async throws -> Data {
+        guard let resolvedURL = URL(string: url) else { throw APIError.invalidResponse }
+        var request = URLRequest(url: resolvedURL)
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        if let companyId = session.user?.companyId {
+            request.setValue(companyId, forHTTPHeaderField: "x-company-id")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+        return data
+    }
+
     func createObject(name: String, address: String, templateCode: String, session: Session) async throws {
         var request = authorizedRequest(path: "/api/objects", session: session)
         request.httpMethod = "POST"
@@ -187,6 +199,23 @@ actor APIClient {
             throw APIError.conflict(message == "Complete every checklist item before closing the task" ? "Сначала отметь все пункты чек-листа" : "Сначала заверши связанные задачи")
         }
         guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
+    }
+
+    func submit(_ pending: PendingTaskClosure, session: Session) async throws {
+        let upload = try await uploadTaskPhoto(
+            taskId: pending.taskId,
+            data: pending.photoData,
+            session: session,
+            idempotencyKey: "ios-close-photo-\(pending.id)"
+        )
+        try await closeTask(
+            taskId: pending.taskId,
+            photoURL: upload.url,
+            latitude: pending.latitude,
+            longitude: pending.longitude,
+            session: session,
+            idempotencyKey: "ios-close-task-\(pending.id)"
+        )
     }
 
     private func validate(_ response: URLResponse) throws {

@@ -42,6 +42,8 @@ struct DashboardView: View {
     @State private var taskStatus = "all"
     @State private var showCreateObject = false
     @State private var showCreateTask = false
+    @State private var pendingClosureCount = 0
+    @State private var selectedPhotoURL: String?
 
     private var tasks: [ProjectTask] { projects.flatMap(\.tasks) }
     private var documents: [ProjectDocument] { projects.flatMap { $0.documents ?? [] } }
@@ -82,6 +84,14 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
+                    if pendingClosureCount > 0 {
+                        Label("Ожидают отправки: \(pendingClosureCount)", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                    }
                     if isLoading { ProgressView("Загрузка...").frame(maxWidth: .infinity) }
                     if !error.isEmpty {
                         Text(error).foregroundStyle(.red)
@@ -109,6 +119,18 @@ struct DashboardView: View {
             TaskCreationView(projects: projects) {
                 showCreateTask = false
                 await load()
+            }
+        }
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { selectedPhotoURL != nil },
+                set: { if !$0 { selectedPhotoURL = nil } }
+            )
+        ) {
+            if let selectedPhotoURL, let current = session.session {
+                FullScreenPhotoView(url: selectedPhotoURL, session: current) {
+                    self.selectedPhotoURL = nil
+                }
             }
         }
     }
@@ -249,7 +271,21 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Фото и технадзор").font(.title2.bold())
             ForEach(reports) { report in
-                LabeledContent(report.point ?? "Фотоотчет", value: statusTitle(report.status ?? "")).cardStyle()
+                VStack(alignment: .leading, spacing: 10) {
+                    LabeledContent(report.point ?? "Фотоотчет", value: statusTitle(report.status ?? ""))
+                    if !report.imageURLs.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(report.imageURLs, id: \.self) { url in
+                                    Button { selectedPhotoURL = url } label: {
+                                        AuthenticatedThumbnail(url: url)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                }.cardStyle()
             }
             ForEach(defects) { defect in
                 LabeledContent(defect.description, value: statusTitle(defect.status)).cardStyle()
@@ -321,6 +357,7 @@ struct DashboardView: View {
             let response = try await APIClient.shared.bootstrap(session: current)
             projects = response.objects
             reviewers = response.reviewers ?? []
+            await syncPendingClosures(session: current)
         }
         catch APIError.invalidCredentials {
             do {
@@ -328,9 +365,24 @@ struct DashboardView: View {
                 let response = try await APIClient.shared.bootstrap(session: refreshed)
                 projects = response.objects
                 reviewers = response.reviewers ?? []
+                await syncPendingClosures(session: refreshed)
             } catch { self.error = error.localizedDescription }
         }
         catch { self.error = error.localizedDescription }
+    }
+
+    private func syncPendingClosures(session: Session) async {
+        let pending = await OfflineQueue.shared.all()
+        pendingClosureCount = pending.count
+        for operation in pending {
+            do {
+                try await APIClient.shared.submit(operation, session: session)
+                try await OfflineQueue.shared.remove(id: operation.id)
+                pendingClosureCount -= 1
+            } catch {
+                break
+            }
+        }
     }
 
     private func statusTitle(_ value: String) -> String {
@@ -360,6 +412,84 @@ struct DashboardView: View {
         case "review": .orange
         case "rejected": .red
         default: .secondary
+        }
+    }
+}
+
+private struct AuthenticatedThumbnail: View {
+    @Environment(SessionStore.self) private var session
+    let url: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Color.secondary.opacity(0.12)
+                    ProgressView()
+                }
+            }
+        }
+        .frame(width: 112, height: 84)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .task(id: url) {
+            guard let current = session.session,
+                  let data = try? await APIClient.shared.imageData(url: url, session: current) else { return }
+            image = UIImage(data: data)
+        }
+    }
+}
+
+private struct FullScreenPhotoView: View {
+    let url: String
+    let session: Session
+    let close: () -> Void
+    @State private var image: UIImage?
+    @State private var error = false
+    @State private var scale = 1.0
+    @State private var lastScale = 1.0
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            Group {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .scaleEffect(scale)
+                        .gesture(
+                            MagnifyGesture()
+                                .onChanged { value in scale = min(max(lastScale * value.magnification, 1), 5) }
+                                .onEnded { _ in lastScale = scale }
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation { scale = scale > 1 ? 1 : 2; lastScale = scale }
+                        }
+                } else if error {
+                    ContentUnavailableView("Фото не загрузилось", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.white)
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Button(action: close) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.white, .black.opacity(0.55))
+            }
+            .padding(20)
+        }
+        .task {
+            do {
+                let data = try await APIClient.shared.imageData(url: url, session: session)
+                image = UIImage(data: data)
+                error = image == nil
+            } catch { error = true }
         }
     }
 }
@@ -761,17 +891,33 @@ private struct TaskDetailView: View {
             let location = try await locationProvider.currentLocation()
             let operationId = closeOperationId ?? UUID().uuidString
             closeOperationId = operationId
-            let upload = try await APIClient.shared.uploadTaskPhoto(
-                taskId: task.id, data: photoData, session: current, idempotencyKey: "ios-close-photo-\(operationId)"
-            )
-            try await APIClient.shared.closeTask(
+            let pending = PendingTaskClosure(
+                id: operationId,
                 taskId: task.id,
-                photoURL: upload.url,
+                photoData: photoData,
                 latitude: location.coordinate.latitude,
                 longitude: location.coordinate.longitude,
-                session: current,
-                idempotencyKey: "ios-close-task-\(operationId)"
+                createdAt: Date()
             )
+            do {
+                try await APIClient.shared.submit(pending, session: current)
+            } catch APIError.serverUnavailable {
+                try await OfflineQueue.shared.enqueue(pending)
+                isClosed = true
+                closeOperationId = nil
+                self.error = "Нет сети. Закрытие задачи сохранено и отправится автоматически"
+                await onChanged()
+                return
+            } catch let urlError as URLError {
+                try await OfflineQueue.shared.enqueue(pending)
+                isClosed = true
+                closeOperationId = nil
+                self.error = urlError.code == .notConnectedToInternet
+                    ? "Нет сети. Закрытие задачи сохранено и отправится автоматически"
+                    : "Связь прервалась. Закрытие задачи сохранено и отправится автоматически"
+                await onChanged()
+                return
+            }
             isClosed = true
             closeOperationId = nil
             await onChanged()

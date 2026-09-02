@@ -148,6 +148,19 @@ struct PhotoReport: Codable, Hashable, Identifiable {
     let id: String
     let objectId: String
     let point: String?
+    let fileUrl: String?
+    let photos: [PhotoReportPhoto]?
     let status: String?
     let createdAt: String
+
+    var imageURLs: [String] {
+        var values = photos?.map(\.uri) ?? []
+        if let fileUrl, !values.contains(fileUrl) { values.insert(fileUrl, at: 0) }
+        return values
+    }
+}
+
+struct PhotoReportPhoto: Codable, Hashable {
+    let angle: String
+    let uri: String
 }
