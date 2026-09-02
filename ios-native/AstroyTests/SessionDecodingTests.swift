@@ -33,4 +33,17 @@ final class SessionDecodingTests: XCTestCase {
         XCTAssertEqual(decoded, request)
         XCTAssertEqual(decoded.photoUrls.count, 1)
     }
+
+    func testRefreshKeepsUserWhenTokensRotate() throws {
+        let user = AuthUser(
+            id: "1", companyId: "2", companyName: "CloudPlus", email: "444",
+            fullName: "Руководитель проекта", locale: "ru", roles: [Role(code: "pm", objectId: nil)]
+        )
+        let current = Session(accessToken: "old", refreshToken: "old-refresh", expiresIn: 900, user: user)
+        let json = #"{"accessToken":"new","refreshToken":"new-refresh","expiresIn":900}"#.data(using: .utf8)!
+        let tokens = try JSONDecoder().decode(RefreshResponse.self, from: json)
+        let updated = Session(accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresIn: tokens.expiresIn, user: current.user)
+        XCTAssertEqual(updated.user?.roles.first?.code, "pm")
+        XCTAssertEqual(updated.accessToken, "new")
+    }
 }

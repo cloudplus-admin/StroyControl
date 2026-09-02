@@ -32,6 +32,24 @@ actor APIClient {
         return try decoder.decode(Session.self, from: data)
     }
 
+    func refresh(session: Session) async throws -> Session {
+        var request = URLRequest(url: baseURL.appending(path: "/api/auth/refresh"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(["refreshToken": session.refreshToken])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.invalidCredentials }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
+        let tokens = try decoder.decode(RefreshResponse.self, from: data)
+        return Session(
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresIn: tokens.expiresIn,
+            user: session.user
+        )
+    }
+
     func logout(session: Session) async {
         var request = authorizedRequest(path: "/api/auth/logout", session: session)
         request.httpMethod = "POST"
@@ -42,6 +60,7 @@ actor APIClient {
         let request = authorizedRequest(path: "/api/mobile/bootstrap", session: session)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.invalidCredentials }
         guard (200..<300).contains(http.statusCode) else { throw APIError.serverUnavailable }
         do {
             return try decoder.decode(BootstrapResponse.self, from: data)

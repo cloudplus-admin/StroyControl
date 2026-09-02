@@ -98,7 +98,9 @@ struct DashboardView: View {
                 LabeledContent("Компания", value: session.session?.user?.companyName ?? "-")
             }
             Button("Выйти", role: .destructive) { Task { await session.logout() } }
-        }.navigationTitle("Профиль")
+        }
+        .scrollBounceBehavior(.always)
+        .navigationTitle("Профиль")
     }
 
     private func contentList<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -112,6 +114,7 @@ struct DashboardView: View {
             }
             content()
         }
+        .scrollBounceBehavior(.always)
         .navigationTitle(title)
         .refreshable { await load() }
         .overlay {
@@ -127,6 +130,12 @@ struct DashboardView: View {
         error = ""
         defer { isLoading = false }
         do { projects = try await APIClient.shared.bootstrap(session: current).objects }
+        catch APIError.invalidCredentials {
+            do {
+                let refreshed = try await session.refresh()
+                projects = try await APIClient.shared.bootstrap(session: refreshed).objects
+            } catch { self.error = error.localizedDescription }
+        }
         catch { self.error = error.localizedDescription }
     }
 
@@ -173,7 +182,9 @@ private struct ProjectDetailView: View {
                     }
                 }
             }
-        }.navigationTitle(project.name)
+        }
+        .scrollBounceBehavior(.always)
+        .navigationTitle(project.name)
     }
 }
 
@@ -261,6 +272,7 @@ private struct TaskDetailView: View {
                 Section { Text(error).foregroundStyle(.red) }
             }
         }
+        .scrollBounceBehavior(.always)
         .navigationTitle(task.title)
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: selectedPhoto) { _, item in

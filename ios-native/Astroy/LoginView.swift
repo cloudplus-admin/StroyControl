@@ -18,6 +18,8 @@ struct LoginView: View {
                 Button(isLoading ? "Входим..." : "Войти") { Task { await login() } }
                     .disabled(isLoading || email.isEmpty || password.isEmpty)
             }
+            .scrollBounceBehavior(.always)
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Астрой")
         }
     }
