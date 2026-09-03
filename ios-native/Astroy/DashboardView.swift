@@ -63,6 +63,8 @@ struct DashboardView: View {
     @State private var showCreateTask = false
     @State private var pendingClosureCount = 0
     @State private var selectedPhotoURL: String?
+    @State private var showDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
     @AppStorage("astroy.subscription-plan") private var selectedPlan = SubscriptionPlan.oneTime.rawValue
 
     private var tasks: [ProjectTask] { projects.flatMap(\.tasks) }
@@ -72,7 +74,7 @@ struct DashboardView: View {
     private var feed: [FeedEvent] { projects.flatMap { $0.feed ?? [] }.sorted { $0.createdAt > $1.createdAt } }
 
     private var roleCode: String {
-        let code = session.session?.user?.roles.first?.code ?? "pm"
+        let code = session.session?.user?.roles.first?.normalizedCode ?? "pm"
         return code == "owner" ? "director" : code
     }
 
@@ -404,6 +406,36 @@ struct DashboardView: View {
             .cardStyle()
             Button("Выйти", role: .destructive) { Task { await session.logout() } }
                 .buttonStyle(.borderedProminent)
+            Link(destination: URL(string: "https://stroycontrol.cloudplus.uz/privacy")!) {
+                Label(language.text("Политика конфиденциальности"), systemImage: "hand.raised")
+            }
+            Button(language.text("Удалить аккаунт"), role: .destructive) {
+                showDeleteAccountConfirmation = true
+            }
+            .disabled(isDeletingAccount)
+            .confirmationDialog(
+                language.text("Удалить аккаунт?"),
+                isPresented: $showDeleteAccountConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button(language.text("Удалить безвозвратно"), role: .destructive) {
+                    Task { await deleteAccount() }
+                }
+                Button(language.text("Отмена"), role: .cancel) {}
+            } message: {
+                Text(language.text("Личные данные будут обезличены, а доступ к аккаунту закрыт."))
+            }
+        }
+    }
+
+    private func deleteAccount() async {
+        isDeletingAccount = true
+        error = ""
+        defer { isDeletingAccount = false }
+        do {
+            try await session.deleteAccount()
+        } catch {
+            self.error = language.text("Не удалось удалить аккаунт. Проверь подключение к интернету.")
         }
     }
 
@@ -900,11 +932,11 @@ private struct TaskDetailView: View {
     }
 
     private var canManage: Bool {
-        session.session?.user?.roles.contains { ["admin", "owner", "pm"].contains($0.code) } == true
+        session.session?.user?.roles.contains { ["admin", "owner", "pm"].contains($0.normalizedCode) } == true
     }
 
     private var isInspector: Bool {
-        session.session?.user?.roles.contains { $0.code == "inspector" } == true
+        session.session?.user?.roles.contains { $0.normalizedCode == "inspector" } == true
     }
 
     private func saveTask() async {

@@ -51,6 +51,13 @@ final class SessionStore {
         session = nil
     }
 
+    func deleteAccount() async throws {
+        guard let current = session else { throw APIError.invalidCredentials }
+        try await APIClient.shared.deleteAccount(session: current)
+        KeychainStore.remove()
+        session = nil
+    }
+
     private func persist() throws {
         guard let session else { return }
         try KeychainStore.save(JSONEncoder().encode(session))

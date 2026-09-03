@@ -115,3 +115,9 @@
 "Покупки восстановлены" = "Purchases restored";
 "Не удалось восстановить покупки" = "Purchases could not be restored";
 "Не удалось загрузить тарифы из App Store" = "Plans could not be loaded from the App Store";
+"Политика конфиденциальности" = "Privacy policy";
+"Удалить аккаунт" = "Delete account";
+"Удалить аккаунт?" = "Delete account?";
+"Удалить безвозвратно" = "Delete permanently";
+"Личные данные будут обезличены, а доступ к аккаунту закрыт." = "Personal data will be anonymized and access to the account will be revoked.";
+"Не удалось удалить аккаунт. Проверь подключение к интернету." = "Could not delete the account. Check your internet connection.";

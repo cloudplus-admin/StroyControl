@@ -115,3 +115,9 @@
 "Покупки восстановлены" = "Xaridlar tiklandi";
 "Не удалось восстановить покупки" = "Xaridlarni tiklab bo'lmadi";
 "Не удалось загрузить тарифы из App Store" = "App Store'dan tariflarni yuklab bo'lmadi";
+"Политика конфиденциальности" = "Maxfiylik siyosati";
+"Удалить аккаунт" = "Hisobni o'chirish";
+"Удалить аккаунт?" = "Hisob o'chirilsinmi?";
+"Удалить безвозвратно" = "Butunlay o'chirish";
+"Личные данные будут обезличены, а доступ к аккаунту закрыт." = "Shaxsiy ma'lumotlar anonimlashtiriladi va hisobga kirish yopiladi.";
+"Не удалось удалить аккаунт. Проверь подключение к интернету." = "Hisobni o'chirib bo'lmadi. Internet aloqasini tekshiring.";

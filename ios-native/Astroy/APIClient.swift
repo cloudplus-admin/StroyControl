@@ -56,6 +56,13 @@ actor APIClient {
         _ = try? await URLSession.shared.data(for: request)
     }
 
+    func deleteAccount(session: Session) async throws {
+        var request = authorizedRequest(path: "/api/auth/account", session: session)
+        request.httpMethod = "DELETE"
+        let (_, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+    }
+
     func bootstrap(session: Session) async throws -> BootstrapResponse {
         let request = authorizedRequest(path: "/api/mobile/bootstrap", session: session)
         let (data, response) = try await URLSession.shared.data(for: request)

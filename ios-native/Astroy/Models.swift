@@ -3,6 +3,8 @@ import Foundation
 struct Role: Codable, Hashable {
     let code: String
     let objectId: String?
+
+    var normalizedCode: String { code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
 }
 
 struct AuthUser: Codable, Hashable {
